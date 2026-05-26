@@ -587,28 +587,21 @@ Currently the bash wrapper only resolves `GEMINI_API_KEY`. Needs a generic looku
 ```bash
 # Resolution order per provider:
 # 1. <PROVIDER>_API_KEY env var
-# 2. .k8-secrets.yaml at $INFRA_ROOT → <provider>.api_key via yq
+# 2. .envrc.k8.dc secrets layer at $INFRA_ROOT
 # 3. Die with instructions
 ```
 
-**`.k8-secrets.yaml` structure:**
-```yaml
-gemini:
-  api_key: "..."
-openai:
-  api_key: "..."
-anthropic:
-  api_key: "..."
-z_ai:
-  api_key: "..."
-stability:
-  api_key: "..."
-replicate:
-  api_token: "..."
-elevenlabs:
-  api_key: "..."
-runway:
-  api_key: "..."
+**`.envrc.k8.dc` secrets layer:**
+```bash
+# In .envrc.k8.dc
+export GEMINI_API_KEY="..."
+export OPENAI_API_KEY="..."
+export ANTHROPIC_API_KEY="..."
+export Z_AI_API_KEY="..."
+export STABILITY_API_KEY="..."
+export REPLICATE_API_TOKEN="..."
+export ELEVENLABS_API_KEY="..."
+export RUNWAY_API_KEY="..."
 ```
 
 ### 2. Async Polling Helper
@@ -779,7 +772,7 @@ generate-media-prompt/
 ├── Cargo.toml
 ├── src/
 │   ├── main.rs                    # CLI (clap), config resolution
-│   ├── config.rs                  # k8-secrets.yaml, env var resolution
+│   ├── config.rs                  # .envrc.k8.dc secrets, env var resolution
 │   ├── schema.rs                  # Prompt YAML parsing, v0.1/v0.2/v0.3 normalization
 │   ├── dag.rs                     # Dependency resolution (Kahn's algorithm)
 │   ├── output.rs                  # Output path resolution, naming logic
@@ -883,7 +876,7 @@ cargo build --release --target x86_64-unknown-linux-gnu
 - [ ] Write `generate_<name>()` function (Python) or `impl MediaProvider` (Rust)
 - [ ] Add to `PROVIDERS` / `MEDIA_PROVIDERS` dispatch
 - [ ] Add API key env var to bash wrapper resolution logic
-- [ ] Add to `.k8-secrets.yaml` example
+- [ ] Add to `.envrc.k8.dc` secrets layer example
 - [ ] Add `provider_options` examples to README.md
 - [ ] Test with `--dry-run`
 - [ ] Test with real API key

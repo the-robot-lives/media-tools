@@ -21,7 +21,7 @@
 #     *.mp4.prompt    → video (legacy, not yet supported)
 #
 # Environment:
-#   GEMINI_API_KEY    API key for Google Gemini (falls back to .k8-secrets.yaml)
+#   GEMINI_API_KEY    API key for Google Gemini (falls back to .envrc.k8.dc)
 #
 # =============================================================================
 set -euo pipefail
@@ -80,7 +80,7 @@ cat <<EOF
     -h, --help         Show this help
 
   ${BLU}Environment:${NC}
-    GEMINI_API_KEY     Google Gemini API key (falls back to .k8-secrets.yaml)
+    GEMINI_API_KEY     Google Gemini API key (falls back to .envrc.k8.dc)
 
   ${BLU}Examples:${NC}
     generate-media-prompt hero.png.prompt
@@ -133,15 +133,11 @@ fi
 # Resolve API key
 # =============================================================================
 if [[ -z "${GEMINI_API_KEY:-}" ]]; then
-  # Try .k8-secrets.yaml
-  SECRETS_FILE="${INFRA_ROOT}/.k8-secrets.yaml"
-  if [[ -f "$SECRETS_FILE" ]] && command -v yq &>/dev/null; then
-    GEMINI_API_KEY="$(yq '.gemini.api_key // ""' "$SECRETS_FILE" 2>/dev/null || echo "")"
-  fi
+  GEMINI_API_KEY="$(_dc_get k8 gemini.api_key '' '')"
 fi
 
 if [[ -z "${GEMINI_API_KEY:-}" ]]; then
-  die "No Gemini API key found.\n   Set GEMINI_API_KEY or add gemini.api_key to ${INFRA_ROOT}/.k8-secrets.yaml"
+  die "No Gemini API key found.\n   Set GEMINI_API_KEY or add gemini.api_key to .envrc.k8.dc secrets layer"
 fi
 
 export GEMINI_API_KEY

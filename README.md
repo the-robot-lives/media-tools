@@ -408,7 +408,7 @@ post_processing:
 The tool resolves the Gemini API key in this order:
 
 1. `GEMINI_API_KEY` environment variable
-2. `.k8-secrets.yaml` at `$INFRA_ROOT` — reads `gemini.api_key` via `yq`
+2. `.envrc.k8.dc` secrets layer at `$INFRA_ROOT`
 3. If neither found, exits with an error and instructions
 
 In `--dry-run` mode, a missing key is tolerated (the plan is shown without API calls).
