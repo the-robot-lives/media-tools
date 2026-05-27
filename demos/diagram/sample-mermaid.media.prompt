@@ -5,8 +5,17 @@ service: z.ai
 model: grok-4.3
 
 prompt:
-  system: "You are a Mermaid diagram generator. Output ONLY valid Mermaid markup. No code fences. No explanation."
-  text: "Create a system architecture diagram showing: load balancer → 3 app servers → shared PostgreSQL + Redis. Include health check endpoints and connection pooling."
+  system: |
+    You are a Mermaid diagram generator.
+    RULES:
+    - Output ONLY valid Mermaid markup. Start with the diagram type (e.g. flowchart TD).
+    - Do NOT wrap output in markdown code fences (no ```mermaid, no ```).
+    - Do NOT include any explanation before or after the diagram.
+    - Use only Mermaid-supported syntax — no raw HTML except <br/> in labels.
+  text: |
+    Create a system architecture diagram showing: load balancer → 3 app servers → shared PostgreSQL + Redis.
+    Include health check endpoints and connection pooling annotations.
+    Use flowchart TD layout.
   provider_options:
     max_tokens: 4096
     temperature: 0.2

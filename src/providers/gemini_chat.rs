@@ -105,10 +105,11 @@ impl ChatProvider for GeminiChatProvider {
 
                 match text {
                     Some(content) => {
+                        let sanitized = super::sanitize_chat_output(content, output_path);
                         if let Some(parent) = output_path.parent() {
                             std::fs::create_dir_all(parent)?;
                         }
-                        std::fs::write(output_path, content)?;
+                        std::fs::write(output_path, sanitized)?;
                         Ok(true)
                     }
                     None => {

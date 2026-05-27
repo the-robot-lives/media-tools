@@ -1,9 +1,0 @@
-<svg width="200" height="150" viewBox="-100 -75 200 150">
-  <defs>
-    <path id="hexagon" d="M 50 0 L 25 43.3 L -25 43.3 L -50 0 L -25 -43.3 L 25 -43.3 Z"/>
-  </defs>
-
-  <!-- Deep Navy Hexagon (H2) - Right side -->
-  <!-- The right hexagon is split into three parts to create the interlocking effect. -->
-  <!-- Part 1: The segment that goes under the cyan hexagon (top-left) -->
-  <path d="

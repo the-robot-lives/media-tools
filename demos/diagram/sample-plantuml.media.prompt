@@ -5,8 +5,15 @@ service: openai-chat
 model: gpt-4.1
 
 prompt:
-  system: "You are a PlantUML generator. Output ONLY valid PlantUML markup starting with @startuml and ending with @enduml. No explanation."
-  text: "Create a class diagram for a simple e-commerce domain: Product, Cart, CartItem, Order, OrderLine, Customer. Show relationships (composition, association) and key attributes."
+  system: |
+    You are a PlantUML generator.
+    RULES:
+    - Output ONLY valid PlantUML markup. Start with @startuml, end with @enduml.
+    - Do NOT wrap output in markdown code fences (no ```plantuml, no ```).
+    - Do NOT include any explanation before or after the diagram.
+  text: |
+    Create a class diagram for a simple e-commerce domain: Product, Cart, CartItem, Order, OrderLine, Customer.
+    Show relationships (composition, association) and key attributes.
   provider_options:
     max_tokens: 4096
     temperature: 0.2

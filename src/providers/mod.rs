@@ -96,6 +96,65 @@ pub fn api_key_env(service: &str) -> &'static str {
     }
 }
 
+pub fn sanitize_chat_output(raw: &str, output_path: &Path) -> String {
+    let mut text = raw.trim().to_string();
+
+    // Strip markdown code fences: ```lang\n...\n```
+    if text.starts_with("```") {
+        if let Some(first_newline) = text.find('\n') {
+            text = text[first_newline + 1..].to_string();
+        }
+        if text.ends_with("```") {
+            text = text[..text.len() - 3].trim_end().to_string();
+        }
+    }
+
+    // Format-specific validation
+    let ext = output_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+
+    match ext {
+        "svg" => {
+            // Must start with < (XML tag) — if not, try to find the <svg tag
+            if !text.starts_with('<') {
+                if let Some(svg_start) = text.find("<svg") {
+                    text = text[svg_start..].to_string();
+                }
+            }
+            // Must end with </svg> — truncated output recovery
+            if !text.contains("</svg>") {
+                // Find last complete tag and close the SVG
+                if text.contains("<svg") {
+                    text.push_str("\n</svg>");
+                }
+            }
+        }
+        "mmd" => {
+            // Mermaid: strip any remaining fence markers
+            text = text
+                .trim_start_matches("```mermaid")
+                .trim_start_matches("```")
+                .trim_end_matches("```")
+                .trim()
+                .to_string();
+        }
+        "puml" => {
+            // PlantUML: ensure @startuml/@enduml present
+            if !text.contains("@startuml") {
+                text = format!("@startuml\n{}", text);
+            }
+            if !text.contains("@enduml") {
+                text.push_str("\n@enduml");
+            }
+        }
+        _ => {}
+    }
+
+    text
+}
+
 pub fn default_model(service: &str) -> &'static str {
     match service {
         "gemini" => "imagen-4.0-generate-001",

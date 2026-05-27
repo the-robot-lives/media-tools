@@ -2,10 +2,10 @@
 
 Quick reference for creating media prompt files. Start with the minimal template for your asset type, then add sections as needed.
 
-Working examples live in `test/` — browse by asset type:
+Working examples live in `demos/` — browse by asset type:
 
 ```
-test/
+demos/
 ├── image/     hero with style reference, logo
 ├── svg/       geometric icon
 ├── diagram/   Mermaid, PlantUML
@@ -16,7 +16,7 @@ test/
 └── game/      Breakout clone (HTML5 Canvas)
 ```
 
-Run any demo: `generate-media-prompt test/image/sample-hero.media.prompt`
+Run any demo: `generate-media-prompt demos/image/sample-hero.media.prompt`
 
 For full schema details, CLI flags, and provider options, see `README.md`.
 

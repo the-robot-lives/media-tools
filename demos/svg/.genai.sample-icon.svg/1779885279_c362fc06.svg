@@ -1,6 +1,0 @@
-<svg width="200" height="150" viewBox="0 0 200 150" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <!-- Define the base hexagon path data -->
-    <!-- Vertices for a hexagon with radius 60, centered at (0,0) -->
-    <!-- (60,0), (30, 51.96), (-30, 51.96), (-60,0), (-30, -51.96), (30, -51.96) -->
-    <path id="hex-base" d="M 60 0 L 

@@ -1,7 +1,0 @@
-```svg
-<svg viewBox="0 0 200 150" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <!-- Define the base hexagon points relative to (0,0) -->
-    <!-- Side length / radius from center to vertex = 40 -->
-    <!-- Vertices: (r, 0), (r/2, r*sqrt(3)/2), (-r/2, r*sqrt(3)/2), (-r, 0), (-r/2, -r*sqrt(3)/2), (r/2, -r*sqrt(3)/2) -->
-    <!-- r=40, r/2=20, r*
