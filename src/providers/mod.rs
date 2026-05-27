@@ -117,16 +117,22 @@ pub fn sanitize_chat_output(raw: &str, output_path: &Path) -> String {
 
     match ext {
         "svg" => {
-            // Must start with < (XML tag) — if not, try to find the <svg tag
             if !text.starts_with('<') {
                 if let Some(svg_start) = text.find("<svg") {
                     text = text[svg_start..].to_string();
                 }
             }
-            // Must end with </svg> — truncated output recovery
             if !text.contains("</svg>") {
-                // Find last complete tag and close the SVG
                 if text.contains("<svg") {
+                    // Remove the last incomplete tag (truncated mid-attribute)
+                    if let Some(last_open) = text.rfind('<') {
+                        let after = &text[last_open..];
+                        // If the tag isn't closed with > it's truncated
+                        if !after.contains('>') {
+                            text.truncate(last_open);
+                        }
+                    }
+                    text = text.trim_end().to_string();
                     text.push_str("\n</svg>");
                 }
             }

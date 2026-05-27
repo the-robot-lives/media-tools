@@ -53,6 +53,12 @@ impl ChatProvider for GeminiChatProvider {
             },
         });
 
+        if let Some(budget) = options.provider_options.get("thinking_budget").and_then(|v| v.as_u64()) {
+            body["generationConfig"]["thinkingConfig"] = json!({
+                "thinkingBudget": budget,
+            });
+        }
+
         if !system_prompt.is_empty() {
             body["systemInstruction"] = json!({
                 "parts": [{ "text": system_prompt }]

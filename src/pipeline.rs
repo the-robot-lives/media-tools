@@ -66,6 +66,26 @@ pub async fn run_generation(
     for prompt in sorted_prompts {
         let mut output_paths = resolve_output_paths(&prompt);
 
+        // Exclude formats produced by renderer post-processing (e.g., svg from mermaid/plantuml)
+        let renderer_formats: Vec<String> = prompt
+            .payload
+            .post_processing
+            .iter()
+            .filter(|pp| pp.action == "render")
+            .filter_map(|pp| {
+                pp.params
+                    .get("output_format")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
+            .collect();
+        if !renderer_formats.is_empty() {
+            output_paths.retain(|p| {
+                let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+                !renderer_formats.contains(&ext.to_string())
+            });
+        }
+
         if !config.force {
             let mut remaining = Vec::new();
             for op in output_paths {

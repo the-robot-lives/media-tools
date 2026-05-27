@@ -20,7 +20,8 @@ prompt:
     Style: clean vector lines, no fills, stroke-width 2.
     ViewBox: 0 0 200 200. Keep paths compact — precompute all vertex coordinates as decimals.
   provider_options:
-    max_tokens: 8192
+    max_tokens: 16384
+    thinking_budget: 1024
     temperature: 0.3
 
 output:
