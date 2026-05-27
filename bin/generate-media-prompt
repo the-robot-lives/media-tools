@@ -5,7 +5,7 @@
 # Usage:
 #   generate-media-prompt hero.media.prompt         # Generate from a single prompt
 #   generate-media-prompt assets/                  # Process all *.prompt files in dir
-#   generate-media-prompt -n 3 hero.media.prompt   # Generate 3 variants
+#   generate-media-prompt -n 3 hero.media.prompt   # Generate 3 candidates, vision-pick best
 #   generate-media-prompt --dry-run hero.media.prompt # Show plan without generating
 #   generate-media-prompt --force hero.media.prompt # Overwrite existing outputs
 #   generate-media-prompt --refine hero.media.prompt # Interactive refinement loop
@@ -70,7 +70,7 @@ cat <<EOF
     generate-media-prompt [flags] <file.prompt|directory> [...]
 
   ${BLU}Flags:${NC}
-    -n <count>         Number of variants to generate (default: 1)
+    -n <count>         Candidates to generate; best is vision-selected (default: 1)
     --dry-run          Show generation plan without making API calls
     --force            Overwrite existing output files
     --refine           Interactive refinement loop after generation
@@ -81,6 +81,8 @@ cat <<EOF
 
   ${BLU}Environment:${NC}
     GEMINI_API_KEY     Google Gemini API key (falls back to .envrc.k8.dc)
+    GROQ_API_KEY       Groq API key for vision evaluation (optional)
+    GROQ_VISION_MODEL  Override vision model (default: meta-llama/llama-4-scout-17b-16e-instruct)
 
   ${BLU}Examples:${NC}
     generate-media-prompt hero.png.prompt
@@ -141,6 +143,17 @@ if [[ -z "${GEMINI_API_KEY:-}" ]]; then
 fi
 
 export GEMINI_API_KEY
+
+# =============================================================================
+# Resolve Groq API key (optional — used for vision evaluation of candidates)
+# =============================================================================
+if [[ -z "${GROQ_API_KEY:-}" ]]; then
+  GROQ_API_KEY="$(_dc_get k8 groq.api_key '' '')"
+fi
+
+if [[ -n "${GROQ_API_KEY:-}" ]]; then
+  export GROQ_API_KEY
+fi
 
 # =============================================================================
 # Validate dependencies — prefer uv (auto-installs pyyaml), fall back to python3

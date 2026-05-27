@@ -1,0 +1,8 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Define a regular hexagon path centered at (0,0) with radius 45 -->
+    <path id="hexagon" d="M 45 0 L 22.5 38.971 L -22.5 38.971 L -45 0 L -22.5 -38.971 L 22.5 -38.971 Z" />
+  </defs>
+
+  <!-- First hexagon (electric cyan) -->
+  <!-- Positioned slightly left and rotated

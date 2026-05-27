@@ -18,6 +18,8 @@ import base64
 import json
 import mimetypes
 import os
+import re
+import secrets
 import sys
 import time
 import urllib.error
@@ -260,10 +262,12 @@ def parse_prompt_file(path: str) -> dict:
     return data
 
 
-def resolve_output_paths(prompt: dict, variant_count: int) -> list[str]:
-    """Return list of output file paths for a prompt with N variants.
+def resolve_output_paths(prompt: dict, variant_count: int = 1) -> list[str]:
+    """Return list of final output file paths (one per format).
 
-    For multi-format prompts, generates one file per format per variant.
+    Variants are generated as candidates inside .genai.{filename}/ — only the
+    best candidate gets hard-linked to the output path, so the output list has
+    one entry per format regardless of variant_count.
     """
     meta = prompt["_meta"]
     name_stem = meta["name_stem"]
@@ -273,15 +277,9 @@ def resolve_output_paths(prompt: dict, variant_count: int) -> list[str]:
     paths = []
     for fmt_entry in formats:
         ext = fmt_entry.get("format", "png")
-        # Check for filename override
         override_name = fmt_entry.get("filename")
         stem = override_name if override_name else name_stem
-
-        for i in range(1, variant_count + 1):
-            if i == 1:
-                paths.append(os.path.join(out_dir, f"{stem}.{ext}"))
-            else:
-                paths.append(os.path.join(out_dir, f"{stem}.{i}.{ext}"))
+        paths.append(os.path.join(out_dir, f"{stem}.{ext}"))
     return paths
 
 
@@ -463,10 +461,13 @@ def build_dependency_graph(prompts: list[dict]) -> list[dict]:
 # =============================================================================
 # Provider dispatch
 # =============================================================================
-DEFAULT_MODEL = "imagen-3.0-generate-002"
+DEFAULT_MODEL = "imagen-4.0-generate-001"
 REFINE_MODEL = "gemini-2.0-flash"
 MAX_RETRIES = 3
 INITIAL_BACKOFF = 2.0  # seconds
+
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 
 def extract_prompt_fields(prompt_data: dict) -> tuple[str, str | None, str | None, dict]:
@@ -540,7 +541,7 @@ def generate_gemini(
     """
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/"
-        f"models/{model}:generateImages?key={api_key}"
+        f"models/{model}:predict?key={api_key}"
     )
 
     body: dict = {
@@ -551,8 +552,6 @@ def generate_gemini(
     }
     if aspect_ratio:
         body["parameters"]["aspectRatio"] = aspect_ratio
-    if negative_prompt:
-        body["parameters"]["negativePrompt"] = negative_prompt
 
     # Map provider_options to API parameters
     if provider_options:
@@ -561,15 +560,24 @@ def generate_gemini(
         if "person_generation" in provider_options:
             body["parameters"]["personGeneration"] = provider_options["person_generation"]
 
-    # Include attachments as reference images (inlineData parts)
+    # Imagen 4 reference image format
     if attachments:
+        ROLE_TO_REF = {
+            "style":     ("REFERENCE_TYPE_STYLE",   "styleImageConfig"),
+            "reference": ("REFERENCE_TYPE_STYLE",   "styleImageConfig"),
+            "subject":   ("REFERENCE_TYPE_SUBJECT", "subjectImageConfig"),
+            "mask":      ("REFERENCE_TYPE_MASK",    "maskImageConfig"),
+        }
         ref_images = []
-        for att in attachments:
+        for i, att in enumerate(attachments):
+            ref_type, config_key = ROLE_TO_REF.get(att["role"], ROLE_TO_REF["style"])
             ref_images.append({
-                "inlineData": {
-                    "mimeType": att["mime_type"],
-                    "data": att["data_b64"],
-                }
+                "referenceImage": {
+                    "bytesBase64Encoded": att["data_b64"],
+                },
+                "referenceType": ref_type,
+                "referenceId": i + 1,
+                config_key: {},
             })
         if ref_images:
             body["instances"][0]["referenceImages"] = ref_images
@@ -864,18 +872,16 @@ def interactive_refine_loop(
             prompt_data["prompt"]["text"] = refined
         prompt_text = refined
 
-        # Regenerate
+        # Regenerate into genai dir, link result
         step("Regenerating with refined prompt")
         for output_path in output_paths:
-            if os.path.exists(output_path):
-                os.remove(output_path)
-
             generate_fn = PROVIDERS.get(service)
             if generate_fn and service == "gemini":
+                candidate = genai_candidate_path(output_path)
                 attachments = load_attachments(prompt_data, verbose)
                 success = generate_fn(
                     prompt_text=refined,
-                    output_path=output_path,
+                    output_path=candidate,
                     api_key=api_key,
                     model=model,
                     aspect_ratio=aspect,
@@ -885,6 +891,7 @@ def interactive_refine_loop(
                     verbose=verbose,
                 )
                 if success:
+                    link_active(candidate, output_path)
                     ok(f"Regenerated: {output_path}")
                 else:
                     fail(f"Regeneration failed: {output_path}")
@@ -893,6 +900,132 @@ def interactive_refine_loop(
             else:
                 warn(f"Unknown provider '{service}' — cannot regenerate")
                 return
+
+
+# =============================================================================
+# .genai output management — generate into hidden dir, vision-pick best, hardlink
+# =============================================================================
+def genai_dir_for(output_path: str) -> Path:
+    """Return the .genai.{filename}/ directory for an output path."""
+    output = Path(output_path)
+    return output.parent / f".genai.{output.name}"
+
+
+def genai_candidate_path(output_path: str) -> str:
+    """Return a unique candidate path inside .genai.{filename}/."""
+    output = Path(output_path)
+    gdir = genai_dir_for(output_path)
+    gdir.mkdir(parents=True, exist_ok=True)
+    unique_id = f"{int(time.time())}_{secrets.token_hex(4)}"
+    return str(gdir / f"{unique_id}{output.suffix}")
+
+
+def link_active(genai_path: str, output_path: str) -> None:
+    """Hard-link a genai candidate as the active output file."""
+    output = Path(output_path)
+    if output.exists() or output.is_symlink():
+        output.unlink()
+    os.link(genai_path, str(output))
+
+
+def evaluate_candidates_groq(
+    candidate_paths: list[str],
+    prompt_text: str,
+    eval_criteria: dict | None = None,
+    api_key: str = "",
+    model: str = GROQ_VISION_MODEL,
+    verbose: bool = False,
+) -> int:
+    """Send all candidate images to Groq vision model, return index of best.
+
+    Falls back to index 0 if the API is unavailable or returns garbage.
+    """
+    if len(candidate_paths) <= 1:
+        return 0
+
+    if not api_key:
+        warn("No GROQ_API_KEY — selecting first candidate")
+        return 0
+
+    content_parts: list[dict] = []
+
+    criteria_text = ""
+    if eval_criteria:
+        criteria_lines = []
+        for name, spec in eval_criteria.items():
+            desc = spec.get("description", name)
+            weight = spec.get("weight", "")
+            criteria_lines.append(f"  - {name} (weight {weight}): {desc}")
+        criteria_text = "\nEvaluation criteria:\n" + "\n".join(criteria_lines)
+
+    content_parts.append({
+        "type": "text",
+        "text": (
+            f"You are evaluating {len(candidate_paths)} AI-generated images.\n"
+            f"The generation prompt was:\n\"{prompt_text}\"\n"
+            f"{criteria_text}\n\n"
+            f"Each image is labelled [Image 1], [Image 2], etc.\n"
+            f"Pick the single best image. Reply with ONLY the number (e.g. 2)."
+        ),
+    })
+
+    for i, cpath in enumerate(candidate_paths):
+        ext = Path(cpath).suffix.lstrip(".")
+        mime = MIME_MAP.get(f".{ext}", f"image/{ext}")
+        try:
+            with open(cpath, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("ascii")
+        except OSError as e:
+            warn(f"Cannot read candidate {cpath}: {e}")
+            continue
+
+        content_parts.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime};base64,{b64}"},
+        })
+        content_parts.append({"type": "text", "text": f"[Image {i + 1}]"})
+
+    body = {
+        "model": model,
+        "messages": [{"role": "user", "content": content_parts}],
+        "temperature": 0,
+        "max_tokens": 16,
+    }
+
+    data = json.dumps(body).encode("utf-8")
+    verbose_log(f"Groq vision eval: {len(candidate_paths)} candidates via {model}", verbose)
+
+    try:
+        req = urllib.request.Request(
+            GROQ_API_URL,
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+
+        text = result["choices"][0]["message"]["content"].strip()
+        verbose_log(f"Groq response: {text!r}", verbose)
+
+        match = re.search(r"\d+", text)
+        if match:
+            idx = int(match.group()) - 1
+            if 0 <= idx < len(candidate_paths):
+                return idx
+
+        warn(f"Could not parse Groq selection ({text!r}) — defaulting to first")
+        return 0
+
+    except (urllib.error.HTTPError, urllib.error.URLError) as e:
+        warn(f"Groq vision eval failed: {e} — selecting first candidate")
+        return 0
+    except (KeyError, IndexError, json.JSONDecodeError) as e:
+        warn(f"Groq response parse error: {e} — selecting first candidate")
+        return 0
 
 
 # =============================================================================
@@ -983,7 +1116,7 @@ def run_generation(
         meta = prompt["_meta"]
         asset_type = meta["asset_type"]
         service = meta["service"]
-        prompt_model = meta.get("model") or model or DEFAULT_MODEL
+        prompt_model = model or meta.get("model") or DEFAULT_MODEL
         prompt_text, negative, aspect, provider_options = extract_prompt_fields(prompt)
 
         print(f"\n  {BOLD}{meta['id']}{NC} ({asset_type}, {service})")
@@ -1017,7 +1150,13 @@ def run_generation(
         return
 
     # Execute generation
-    step(f"Generating {total_outputs} output(s)")
+    groq_key = os.environ.get("GROQ_API_KEY", "")
+    groq_model = os.environ.get("GROQ_VISION_MODEL", GROQ_VISION_MODEL)
+
+    step(f"Generating {total_outputs} output(s), {variant_count} candidate(s) each")
+    if variant_count > 1 and not groq_key:
+        warn("GROQ_API_KEY not set — will pick first candidate instead of vision-evaluating")
+
     succeeded = 0
     failed = 0
     gen_index = 0
@@ -1026,18 +1165,16 @@ def run_generation(
         meta = prompt["_meta"]
         asset_type = meta["asset_type"]
         service = meta["service"]
-        prompt_model = meta.get("model") or model or DEFAULT_MODEL
+        prompt_model = model or meta.get("model") or DEFAULT_MODEL
 
         prompt_text, negative, aspect, provider_options = extract_prompt_fields(prompt)
 
-        # Dispatch to provider
         generate_fn = PROVIDERS.get(service)
         if generate_fn is None:
             warn(f"Unknown provider '{service}' for {meta['id']} — skipping")
             failed += len(paths)
             continue
 
-        # For non-gemini providers, they are stubs that just warn
         if service != "gemini":
             gen_index += len(paths)
             for output_path in paths:
@@ -1046,36 +1183,66 @@ def run_generation(
             failed += len(paths)
             continue
 
-        # Only image generation is supported for gemini currently
         if asset_type != "image":
             warn(f"Skipping {meta['id']}: {asset_type} generation not yet supported via {service}")
             failed += len(paths)
             continue
 
-        # Load attachments
         attachments = load_attachments(prompt, verbose)
 
         for output_path in paths:
             gen_index += 1
-            print(f"\n  {CYN}[{gen_index}/{total_outputs}]{NC} {os.path.basename(output_path)}")
+            basename = os.path.basename(output_path)
+            print(f"\n  {CYN}[{gen_index}/{total_outputs}]{NC} {basename}")
 
-            success = generate_fn(
-                prompt_text=prompt_text,
-                output_path=output_path,
-                api_key=api_key,
-                model=prompt_model,
-                aspect_ratio=aspect,
-                negative_prompt=negative,
-                provider_options=provider_options,
-                attachments=attachments or None,
-                verbose=verbose,
-            )
+            # Generate N candidates into .genai.{filename}/
+            candidates: list[str] = []
+            for v in range(variant_count):
+                candidate = genai_candidate_path(output_path)
+                if variant_count > 1:
+                    verbose_log(f"Candidate {v + 1}/{variant_count}: {Path(candidate).name}", verbose)
 
-            if success:
-                ok(f"Generated: {output_path}")
-                succeeded += 1
-            else:
+                ok_gen = generate_fn(
+                    prompt_text=prompt_text,
+                    output_path=candidate,
+                    api_key=api_key,
+                    model=prompt_model,
+                    aspect_ratio=aspect,
+                    negative_prompt=negative,
+                    provider_options=provider_options,
+                    attachments=attachments or None,
+                    verbose=verbose,
+                )
+                if ok_gen:
+                    candidates.append(candidate)
+                else:
+                    warn(f"Candidate {v + 1} failed for {basename}")
+
+            if not candidates:
+                fail(f"All candidates failed: {output_path}")
                 failed += 1
+                continue
+
+            # Pick the best candidate
+            if len(candidates) > 1:
+                step(f"Evaluating {len(candidates)} candidates for {basename}")
+                eval_criteria = prompt.get("eval", {}).get("criteria")
+                best_idx = evaluate_candidates_groq(
+                    candidate_paths=candidates,
+                    prompt_text=prompt_text,
+                    eval_criteria=eval_criteria,
+                    api_key=groq_key,
+                    model=groq_model,
+                    verbose=verbose,
+                )
+                info(f"Selected candidate {best_idx + 1} of {len(candidates)}")
+            else:
+                best_idx = 0
+
+            link_active(candidates[best_idx], output_path)
+            ok(f"Generated: {output_path}")
+            verbose_log(f"Active link: {Path(candidates[best_idx]).name} -> {basename}", verbose)
+            succeeded += 1
 
         # Post-processing
         run_post_processing(prompt, paths, verbose)

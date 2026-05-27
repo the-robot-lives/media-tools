@@ -208,9 +208,15 @@ The `service` field selects which API to call. The `model` field is optional and
 
 ### Implemented
 
-| Service | Default Model | Notes |
-|---------|---------------|-------|
-| `gemini` | `imagen-3.0-generate-002` | Google AI Studio Imagen API. Full support. |
+| Service | Default Model | Type | Notes |
+|---------|---------------|------|-------|
+| `gemini` | `imagen-4.0-generate-001` | Image | Google AI Studio Imagen API. Full support. |
+| `suno` | `V4_5ALL` | Audio | Music generation via [Suno API](https://docs.sunoapi.org). Async polling. |
+| `openai-tts` | `gpt-4o-mini-tts` | Audio | OpenAI TTS. 13 voices, steerable via instructions. Synchronous. |
+| `elevenlabs` | `eleven_multilingual_v2` | Audio | ElevenLabs TTS. Voice cloning, fine-grained voice settings. Synchronous. |
+| `qwen-tts` | `qwen3-tts-flash` | Audio | Alibaba Qwen TTS via DashScope. 40+ voices, 10 languages. Returns URL. |
+| `grok-video` | `grok-imagine-video` | Video | xAI Grok Imagine video. 1-15s, up to 720p. Async polling. |
+| `veo` | `veo-3.0-generate-001` | Video | Google Veo via Gemini API. 4-8s, up to 4K. Async polling. Uses `GEMINI_API_KEY`. |
 
 ### Planned (stubbed — parses config, warns "not yet implemented")
 
@@ -226,8 +232,6 @@ The `service` field selects which API to call. The `model` field is optional and
 | `together` | Image | Together AI |
 | `fireworks` | Image | Fireworks AI |
 | `local` | Image | ComfyUI / Automatic1111 |
-| `elevenlabs` | Audio | TTS, voice cloning |
-| `suno` | Audio | Music generation |
 | `udio` | Audio | Music generation |
 | `bark` | Audio | Open-source TTS |
 | `musicgen` | Audio | Meta's music generation |
@@ -236,7 +240,7 @@ The `service` field selects which API to call. The `model` field is optional and
 | `kling` | Video | Video generation |
 | `minimax` | Video | Video generation |
 
-Adding a provider requires implementing one function (see `generate_gemini` as reference) and adding it to the `PROVIDERS` dict in `media-prompt-engine.py`.
+Adding a provider requires implementing the `MediaProvider` trait (see `src/providers/gemini.rs` as reference) and registering it in `src/providers/mod.rs`.
 
 ### Provider Options
 
@@ -249,7 +253,77 @@ prompt:
     safety_filter_level: BLOCK_MEDIUM_AND_ABOVE
     person_generation: ALLOW_ADULT
 
-# OpenAI (when implemented)
+# Suno — music generation
+prompt:
+  provider_options:
+    customMode: true           # Enable custom mode (requires style + title)
+    instrumental: true         # Instrumental only (no vocals)
+    style: "Lo-fi Hip Hop"    # Genre/style (required in custom mode, max 200-1000 chars)
+    title: "Study Beats"      # Song title (required in custom mode, max 80-100 chars)
+    negativeTags: "Heavy Metal, Screaming"  # Styles to exclude
+    vocalGender: "f"           # Vocal gender: "m" or "f"
+    styleWeight: 0.65          # Style adherence weight (0.0-1.0)
+    weirdnessConstraint: 0.3   # Creative deviation constraint (0.0-1.0)
+    audioWeight: 0.5           # Input audio influence weight (0.0-1.0)
+    personaId: "persona_123"   # Persona ID for voice/style transfer
+    personaModel: "style_persona"  # "style_persona" or "voice_persona"
+  # prompt.negative maps to negativeTags automatically
+
+# OpenAI TTS — text-to-speech
+prompt:
+  provider_options:
+    voice: nova              # alloy|ash|ballad|coral|echo|fable|nova|onyx|sage|shimmer|verse|marin|cedar
+    instructions: "Speak slowly with dramatic tone"  # gpt-4o-mini-tts only
+    speed: 0.9               # Speech speed multiplier
+    language: en              # ISO language code
+  # Models: gpt-4o-mini-tts (recommended), tts-1, tts-1-hd
+  # Output formats: mp3, opus, aac, flac, wav, pcm
+
+# ElevenLabs — TTS with voice cloning
+prompt:
+  provider_options:
+    voice_id: "21m00Tcm4TlvDq8ikWAM"  # Voice ID (use ElevenLabs API to list voices)
+    stability: 0.75           # Voice stability (0.0-1.0)
+    similarity_boost: 0.8     # Voice similarity (0.0-1.0)
+    style: 0.4                # Style exaggeration (0.0-1.0)
+    speed: 0.95               # Speech speed
+    use_speaker_boost: true   # Speaker boost
+    language_code: en          # ISO 639-1
+    seed: 42                   # Deterministic output
+  # Models: eleven_multilingual_v2, eleven_turbo_v2_5, eleven_turbo_v2
+
+# Qwen TTS — Alibaba DashScope
+prompt:
+  provider_options:
+    voice: Cherry             # 40+ voices: Cherry, Serena, Ethan, Chelsie, etc.
+    language: English         # English, Chinese, Japanese, Korean, German, French, etc.
+    instructions: "Speak warmly"  # For instruct models only
+    region: intl              # intl (default) or cn
+  # Models: qwen3-tts-flash, qwen3-tts-instruct-flash
+
+# Grok Video — xAI video generation
+prompt:
+  provider_options:
+    duration: 10             # 1-15 seconds (default: 10)
+    resolution: "720p"       # 720p or 480p (default: 480p)
+  # aspect_ratio set via output.dimensions.aspect_ratio
+  # Supported: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3
+  # Image-to-video: add an attachment with role "base"
+  # Models: grok-imagine-video
+
+# Veo — Google video generation (uses GEMINI_API_KEY)
+prompt:
+  provider_options:
+    durationSeconds: 8       # 4, 6, or 8 (default: 8)
+    resolution: "720p"       # 720p, 1080p, or 4k (default: 720p)
+    personGeneration: "allow_adult"  # allow_all or allow_adult
+    seed: 42                  # For consistency across runs
+  # aspect_ratio set via output.dimensions.aspect_ratio (16:9 or 9:16)
+  # Image-to-video: add an attachment with role "base"
+  # Models: veo-3.0-generate-001, veo-3.1-generate-preview, veo-3.1-fast-generate-preview,
+  #         veo-3.1-lite-generate-preview, veo-3.0-fast-generate-001, veo-2.0-generate-001
+
+# OpenAI Image (when implemented)
 prompt:
   provider_options:
     quality: hd
@@ -405,13 +479,23 @@ post_processing:
 
 ## API Key Resolution
 
-The tool resolves the Gemini API key in this order:
+Each provider uses its own API key, resolved in this order:
 
-1. `GEMINI_API_KEY` environment variable
+1. Environment variable (`GEMINI_API_KEY`, `SUNO_API_KEY`, etc.)
 2. `.envrc.k8.dc` secrets layer at `$INFRA_ROOT`
-3. If neither found, exits with an error and instructions
+3. If neither found, exits with an error naming the missing key
 
-In `--dry-run` mode, a missing key is tolerated (the plan is shown without API calls).
+In `--dry-run` mode, missing keys are tolerated (the plan is shown without API calls).
+
+| Provider | Environment Variable | Where to get it |
+|----------|---------------------|-----------------|
+| `gemini` | `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/apikey) |
+| `suno` | `SUNO_API_KEY` | [Suno API Keys](https://sunoapi.org/api-key) |
+| `openai-tts` | `OPENAI_API_KEY` | [OpenAI Platform](https://platform.openai.com/api-keys) |
+| `elevenlabs` | `ELEVENLABS_API_KEY` | [ElevenLabs](https://elevenlabs.io/app/settings/api-keys) |
+| `qwen-tts` | `DASHSCOPE_API_KEY` | [Alibaba DashScope](https://dashscope.console.aliyun.com/) |
+| `grok-video` | `XAI_API_KEY` | [xAI API](https://x.ai/api) |
+| `veo` | `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/apikey) (shared with `gemini`) |
 
 ---
 
@@ -510,8 +594,8 @@ Use `generate_gemini` as the reference implementation.
 
 ### Lower Priority
 
-- [ ] **Audio providers** — ElevenLabs, Suno, Bark, MusicGen
-- [ ] **Video providers** — Runway, Pika, Kling, Minimax
+- [ ] **Audio providers** — Bark, MusicGen, Udio (Suno, OpenAI TTS, ElevenLabs, Qwen TTS: done)
+- [ ] **Video providers** — Runway, Pika, Kling, Minimax (Grok Video, Veo: done)
 - [ ] **Component generation** — Lit web component stub generation from prompt specs
 - [ ] **Post-processing: normalize** — ffmpeg loudness normalization for audio
 - [ ] **Ideogram / Recraft providers** — Specialized image generation
