@@ -1,7 +1,9 @@
 INSTALL_DIR ?= $(HOME)/.local/bin
 LIB_INSTALL_DIR ?= $(HOME)/.local/lib/media-tools
 
-.PHONY: build test install clean install-legacy
+.PHONY: compile build test install clean install-legacy
+
+compile: build
 
 build:
 	@cargo build --release
