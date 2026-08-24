@@ -555,6 +555,7 @@ In `--dry-run` mode, missing keys are tolerated (the plan is shown without API c
 | `gemini` | `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/apikey) |
 | `suno` | `SUNO_API_KEY` | [Suno API Keys](https://sunoapi.org/api-key) |
 | `openai-tts` | `OPENAI_API_KEY` | [OpenAI Platform](https://platform.openai.com/api-keys) |
+| `openrouter` | `OPENROUTER_API_KEY` | [OpenRouter Keys](https://openrouter.ai/keys) |
 | `elevenlabs` | `ELEVENLABS_API_KEY` | [ElevenLabs](https://elevenlabs.io/app/settings/api-keys) |
 | `qwen-tts` | `DASHSCOPE_API_KEY` / `QWEN_API_KEY` / `QWEN_TOKEN_KEY` | [Alibaba DashScope](https://dashscope.console.aliyun.com/) |
 | `qwen-image` | `DASHSCOPE_API_KEY` / `QWEN_API_KEY` / `QWEN_TOKEN_KEY` | Qwen Image 3.0 |

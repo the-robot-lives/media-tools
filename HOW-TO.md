@@ -354,6 +354,7 @@ In v0.4, **declare `quality:` instead of `service:`** for most prompts. The tool
 | `gemini-chat` | Text/SVG/diagrams | `gemini-2.5-flash` | `GEMINI_API_KEY` |
 | `anthropic` | Text/diagrams | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
 | `openai-chat` | Text | `gpt-4.1` | `OPENAI_API_KEY` |
+| `openrouter` | Text | `openai/gpt-4o-mini` | `OPENROUTER_API_KEY` |
 | `openai-tts` | Voice | `gpt-4o-mini-tts` | `OPENAI_API_KEY` |
 | `elevenlabs` | Voice | `eleven_multilingual_v2` | `ELEVENLABS_API_KEY` |
 | `qwen-tts` | Voice | `qwen3-tts-flash` | `DASHSCOPE_API_KEY` / `QWEN_API_KEY` / `QWEN_TOKEN_KEY` |

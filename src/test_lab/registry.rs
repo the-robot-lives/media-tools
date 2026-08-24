@@ -664,6 +664,10 @@ const CHAT_API_TABLE: &[ChatRow] = &[
         description: "OpenAI chat completions",
     },
     ChatRow {
+        slug: "openrouter",
+        description: "OpenRouter OpenAI-compatible chat",
+    },
+    ChatRow {
         slug: "z.ai",
         description: "xAI Grok chat (z.ai alias)",
     },
@@ -905,6 +909,7 @@ fn demos_for(
     // aliases
     let aliases: &[&str] = match slug {
         "groq-chat" => &["groq"],
+        "openrouter" => &["openrouter-chat"],
         "z.ai" => &["zai", "z.ai"],
         "gemini" => &["imagen"],
         "graphviz" => &["dot", "graphviz-dot"],

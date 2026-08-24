@@ -7,6 +7,7 @@ pub mod grok_video;
 pub mod groq_chat;
 pub mod openai_chat;
 pub mod openai_tts;
+pub mod openrouter;
 pub mod qwen_image;
 pub mod qwen_tts;
 pub mod suno;
@@ -279,6 +280,9 @@ pub fn get_chat_provider(service: &str) -> Option<Box<dyn ChatProvider>> {
         "gemini-chat" => Some(Box::new(gemini_chat::GeminiChatProvider)),
         "groq" | "groq-chat" => Some(Box::new(groq_chat::GroqChatProvider)),
         "openai-chat" => Some(Box::new(openai_chat::OpenAiChatProvider)),
+        "openrouter" | "openrouter-chat" => {
+            Some(Box::new(openrouter::OpenRouterChatProvider))
+        }
         "zai" | "z.ai" => Some(Box::new(zai::ZaiProvider)),
         _ => None,
     }
@@ -303,6 +307,8 @@ pub fn is_stub_provider(service: &str) -> bool {
             | "groq"
             | "groq-chat"
             | "openai-chat"
+            | "openrouter"
+            | "openrouter-chat"
             | "zai"
             | "z.ai"
     )
@@ -321,6 +327,7 @@ pub fn api_key_env(service: &str) -> &'static str {
         "gemini-chat" => "GEMINI_API_KEY",
         "groq" | "groq-chat" => "GROQ_API_KEY",
         "openai-chat" => "OPENAI_API_KEY",
+        "openrouter" | "openrouter-chat" => "OPENROUTER_API_KEY",
         "zai" | "z.ai" => "XAI_API_KEY",
         _ => "GEMINI_API_KEY",
     }
@@ -436,6 +443,7 @@ pub fn default_model(service: &str) -> &'static str {
         "gemini-chat" => "gemini-2.5-flash",
         "groq" | "groq-chat" => DEFAULT_CHAT_MODEL,
         "openai-chat" => "gpt-4.1",
+        "openrouter" | "openrouter-chat" => "openai/gpt-4o-mini",
         "zai" | "z.ai" => "grok-4.3",
         _ => "default",
     }
@@ -467,6 +475,15 @@ mod tests {
         assert_eq!(music[0].service, "suno");
         let voice = candidates_for(AssetType::Audio, AudioKind::Voice, Quality::Medium);
         assert!(voice.iter().any(|c| c.service == "openai-tts"));
+    }
+
+    #[test]
+    fn openrouter_chat_is_wired() {
+        assert_eq!(api_key_env("openrouter"), "OPENROUTER_API_KEY");
+        assert_eq!(default_model("openrouter"), "openai/gpt-4o-mini");
+        assert!(get_chat_provider("openrouter").is_some());
+        assert!(get_chat_provider("openrouter-chat").is_some());
+        assert!(!is_stub_provider("openrouter"));
     }
 
     #[test]

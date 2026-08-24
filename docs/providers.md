@@ -89,6 +89,7 @@ post_processing:
 | `anthropic` | **Done** | — | — | `ANTHROPIC_API_KEY` | Pin via `service:` |
 | `gemini-chat` | **Done** | — | — | `GEMINI_API_KEY` | Pin via `service:` |
 | `openai-chat` | **Done** | — | — | `OPENAI_API_KEY` | Pin via `service:` |
+| `openrouter` / `openrouter-chat` | **Done** | — | — | `OPENROUTER_API_KEY` | Pin via `service:` |
 | `z.ai` / `zai` | **Done** | — | — | `XAI_API_KEY` | Pin via `service:` |
 
 ### Renderers (local tools)
