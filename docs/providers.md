@@ -58,7 +58,9 @@ post_processing:
 | `suno` | Music/SFX | **Done** | — | — | `SUNO_API_KEY` |
 | `openai-tts` | Voice | **Done** | — | — | `OPENAI_API_KEY` |
 | `elevenlabs` | Voice | **Done** | — | — | `ELEVENLABS_API_KEY` |
-| `qwen-tts` | Voice | **Done** | — | — | `DASHSCOPE_API_KEY` |
+| `qwen-tts` | Voice | **Done** | — | — | `DASHSCOPE_API_KEY` / `QWEN_API_KEY` / `QWEN_TOKEN_KEY` |
+| `qwen-image` | Image | **Done** | — | — | `DASHSCOPE_API_KEY` / `QWEN_API_KEY` / `QWEN_TOKEN_KEY` |
+| `wan-video` | Video | **Done** | — | — | `DASHSCOPE_API_KEY` / `QWEN_API_KEY` / `QWEN_TOKEN_KEY` |
 | `veo` | Video | **Done** | — | — | `GEMINI_API_KEY` |
 | `grok-video` | Video | **Done** | — | — | `XAI_API_KEY` |
 | `openai` | Image | Todo | P0 | Low | `OPENAI_API_KEY` |

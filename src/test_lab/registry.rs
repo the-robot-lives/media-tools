@@ -114,6 +114,8 @@ pub fn build_catalog(demos_dir: &Path, package_root: &Path) -> ProviderCatalog {
                     | "openai-tts"
                     | "elevenlabs"
                     | "qwen-tts"
+                    | "qwen-image"
+                    | "wan-video"
                     | "veo"
                     | "grok-video"
             );
@@ -573,6 +575,20 @@ const MEDIA_API_TABLE: &[MediaRow] = &[
         asset_types: &["voice", "audio"],
         default_ext: "mp3",
         fim: Some("providers/qwen-tts.md"),
+    },
+    MediaRow {
+        slug: "qwen-image",
+        description: "Qwen Image 3.0 (DashScope T2I/I2I)",
+        asset_types: &["image"],
+        default_ext: "png",
+        fim: Some("providers/qwen-image.md"),
+    },
+    MediaRow {
+        slug: "wan-video",
+        description: "Alibaba Wan 2.7 text/image-to-video",
+        asset_types: &["video"],
+        default_ext: "mp4",
+        fim: Some("providers/wan-video.md"),
     },
     MediaRow {
         slug: "veo",

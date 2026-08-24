@@ -7,7 +7,7 @@ use crate::output::{genai_candidate_path, link_active, resolve_output_paths, wri
 use crate::prep::PromptPrepper;
 use crate::providers::{
     self, api_key_env, available, candidates_for, constraints, get_chat_provider, get_provider,
-    is_stub_provider, Candidate, GenerationOptions,
+    is_stub_provider, resolve_api_key, Candidate, GenerationOptions,
 };
 use crate::refine::interactive_refine_loop;
 use crate::renderers;
@@ -471,7 +471,7 @@ pub async fn run_generation(
             // Use actual service for refinement (first candidate's service)
             let refine_service = candidates[0].service;
             let refine_model = candidates[0].model;
-            let refine_key = std::env::var(api_key_env(refine_service)).unwrap_or_default();
+            let refine_key = resolve_api_key(refine_service).unwrap_or_default();
 
             interactive_refine_loop(
                 &mut prompt,
@@ -713,7 +713,7 @@ async fn run_eval_gated(
         }
 
         let env_name = api_key_env(svc);
-        let api_key = std::env::var(env_name).unwrap_or_default();
+        let api_key = resolve_api_key(svc).unwrap_or_default();
         if api_key.is_empty() {
             ui::warn_msg(&format!(
                 "{} not set — skipping {} ({} provider)",
@@ -1063,7 +1063,10 @@ async fn run_legacy_variants(
             "suno" | "openai-tts" | "elevenlabs" | "qwen-tts" => {
                 prompt.meta.asset_type == AssetType::Audio
             }
-            "grok-video" | "veo" => prompt.meta.asset_type == AssetType::Video,
+            "qwen-image" => prompt.meta.asset_type == AssetType::Image,
+            "grok-video" | "veo" | "wan-video" | "happyhorse" => {
+                prompt.meta.asset_type == AssetType::Video
+            }
             _ => prompt.meta.asset_type == AssetType::Image,
         }
     };
@@ -1077,7 +1080,7 @@ async fn run_legacy_variants(
     }
 
     let env_name = api_key_env(svc);
-    let api_key = std::env::var(env_name).unwrap_or_default();
+    let api_key = resolve_api_key(svc).unwrap_or_default();
     if api_key.is_empty() {
         ui::warn_msg(&format!(
             "{} not set — skipping {} ({} provider)",

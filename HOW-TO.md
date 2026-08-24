@@ -356,7 +356,9 @@ In v0.4, **declare `quality:` instead of `service:`** for most prompts. The tool
 | `openai-chat` | Text | `gpt-4.1` | `OPENAI_API_KEY` |
 | `openai-tts` | Voice | `gpt-4o-mini-tts` | `OPENAI_API_KEY` |
 | `elevenlabs` | Voice | `eleven_multilingual_v2` | `ELEVENLABS_API_KEY` |
-| `qwen-tts` | Voice | `qwen3-tts-flash` | `DASHSCOPE_API_KEY` |
+| `qwen-tts` | Voice | `qwen3-tts-flash` | `DASHSCOPE_API_KEY` / `QWEN_API_KEY` / `QWEN_TOKEN_KEY` |
+| `qwen-image` | Image | `qwen-image-3.0` | `DASHSCOPE_API_KEY` / `QWEN_API_KEY` / `QWEN_TOKEN_KEY` |
+| `wan-video` | Video | `wan2.7-t2v` | `DASHSCOPE_API_KEY` / `QWEN_API_KEY` / `QWEN_TOKEN_KEY` |
 | `suno` | Music | `V4_5ALL` | `SUNO_API_KEY` |
 | `veo` | Video | `veo-3.0-generate-001` | `GEMINI_API_KEY` |
 | `grok-video` | Video | `grok-imagine-video` | `XAI_API_KEY` |

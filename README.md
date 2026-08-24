@@ -226,6 +226,8 @@ The `service` field selects which API to call. The `model` field is optional and
 | `openai-tts` | `gpt-4o-mini-tts` | Audio | OpenAI TTS. 13 voices, steerable via instructions. Synchronous. |
 | `elevenlabs` | `eleven_multilingual_v2` | Audio | ElevenLabs TTS. Voice cloning, fine-grained voice settings. Synchronous. |
 | `qwen-tts` | `qwen3-tts-flash` | Audio | Alibaba Qwen TTS via DashScope. 40+ voices, 10 languages. Returns URL. |
+| `qwen-image` | `qwen-image-3.0` | Image | Qwen Image 3.0 T2I/I2I via DashScope multimodal-generation. |
+| `wan-video` | `wan2.7-t2v` | Video | Alibaba Wan 2.7 async text/image-to-video (polls task). |
 | `grok-video` | `grok-imagine-video` | Video | xAI Grok Imagine video. 1-15s, up to 720p. Async polling. |
 | `veo` | `veo-3.0-generate-001` | Video | Google Veo via Gemini API. 4-8s, up to 4K. Async polling. Uses `GEMINI_API_KEY`. |
 
@@ -554,7 +556,9 @@ In `--dry-run` mode, missing keys are tolerated (the plan is shown without API c
 | `suno` | `SUNO_API_KEY` | [Suno API Keys](https://sunoapi.org/api-key) |
 | `openai-tts` | `OPENAI_API_KEY` | [OpenAI Platform](https://platform.openai.com/api-keys) |
 | `elevenlabs` | `ELEVENLABS_API_KEY` | [ElevenLabs](https://elevenlabs.io/app/settings/api-keys) |
-| `qwen-tts` | `DASHSCOPE_API_KEY` | [Alibaba DashScope](https://dashscope.console.aliyun.com/) |
+| `qwen-tts` | `DASHSCOPE_API_KEY` / `QWEN_API_KEY` / `QWEN_TOKEN_KEY` | [Alibaba DashScope](https://dashscope.console.aliyun.com/) |
+| `qwen-image` | `DASHSCOPE_API_KEY` / `QWEN_API_KEY` / `QWEN_TOKEN_KEY` | Qwen Image 3.0 |
+| `wan-video` | `DASHSCOPE_API_KEY` / `QWEN_API_KEY` / `QWEN_TOKEN_KEY` | Wan 2.7 video |
 | `grok-video` | `XAI_API_KEY` | [xAI API](https://x.ai/api) |
 | `veo` | `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/apikey) (shared with `gemini`) |
 

@@ -154,6 +154,8 @@ fn provider_solution(dir: &Path, service: &str) -> Option<PathBuf> {
         "elevenlabs" => "providers/elevenlabs.md",
         "openai-tts" => "providers/openai-tts.md",
         "qwen-tts" => "providers/qwen-tts.md",
+        "qwen-image" => "providers/qwen-image.md",
+        "wan-video" | "happyhorse" => "providers/wan-video.md",
         "udio" => "providers/udio.md",
         _ => return None,
     };

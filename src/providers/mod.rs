@@ -1,4 +1,5 @@
 pub mod anthropic;
+pub mod dashscope;
 pub mod elevenlabs;
 pub mod gemini;
 pub mod gemini_chat;
@@ -6,9 +7,11 @@ pub mod grok_video;
 pub mod groq_chat;
 pub mod openai_chat;
 pub mod openai_tts;
+pub mod qwen_image;
 pub mod qwen_tts;
 pub mod suno;
 pub mod veo;
+pub mod wan_video;
 pub mod zai;
 
 use std::collections::HashMap;
@@ -88,14 +91,26 @@ pub fn candidates_for(
 ) -> Vec<Candidate> {
     match asset_type {
         AssetType::Image => match quality {
-            Quality::Low => vec![Candidate {
-                service: "gemini",
-                model: "imagen-4.0-fast-generate-001",
-            }],
-            Quality::Medium => vec![Candidate {
-                service: "gemini",
-                model: "imagen-4.0-generate-001",
-            }],
+            Quality::Low => vec![
+                Candidate {
+                    service: "gemini",
+                    model: "imagen-4.0-fast-generate-001",
+                },
+                Candidate {
+                    service: "qwen-image",
+                    model: "qwen-image-3.0",
+                },
+            ],
+            Quality::Medium => vec![
+                Candidate {
+                    service: "gemini",
+                    model: "imagen-4.0-generate-001",
+                },
+                Candidate {
+                    service: "qwen-image",
+                    model: "qwen-image-3.0",
+                },
+            ],
             Quality::High => vec![
                 Candidate {
                     service: "gemini",
@@ -104,6 +119,10 @@ pub fn candidates_for(
                 Candidate {
                     service: "gemini",
                     model: "imagen-4.0-generate-001",
+                },
+                Candidate {
+                    service: "qwen-image",
+                    model: "qwen-image-3.0-pro",
                 },
             ],
         },
@@ -118,6 +137,10 @@ pub fn candidates_for(
                     service: "veo",
                     model: "veo-3.0-fast-generate-001",
                 },
+                Candidate {
+                    service: "wan-video",
+                    model: "wan2.7-t2v",
+                },
             ],
             Quality::Medium => vec![
                 Candidate {
@@ -128,6 +151,10 @@ pub fn candidates_for(
                     service: "grok-video",
                     model: "grok-imagine-video",
                 },
+                Candidate {
+                    service: "wan-video",
+                    model: "wan2.7-t2v",
+                },
             ],
             Quality::High => vec![
                 Candidate {
@@ -137,6 +164,10 @@ pub fn candidates_for(
                 Candidate {
                     service: "grok-video",
                     model: "grok-imagine-video",
+                },
+                Candidate {
+                    service: "wan-video",
+                    model: "wan2.7-t2v",
                 },
             ],
         },
@@ -207,8 +238,18 @@ pub fn candidates_for(
 /// Returns true if the candidate's required API key env var is set and non-empty.
 // ⟦𓀖𓂿𓎇𓃟⟧ available :: Returns true if the candidate's required API key env var is set and non-empty.
 pub fn available(c: &Candidate) -> bool {
-    let env = api_key_env(c.service);
-    std::env::var(env).map(|v| !v.is_empty()).unwrap_or(false)
+    resolve_api_key(c.service).is_some()
+}
+
+/// Resolve the runtime API key for a service (DashScope family accepts several env names).
+pub fn resolve_api_key(service: &str) -> Option<String> {
+    match service {
+        "qwen-tts" | "qwen-image" | "wan-video" | "happyhorse" => dashscope::resolve_key(),
+        other => {
+            let env = api_key_env(other);
+            std::env::var(env).ok().filter(|v| !v.is_empty())
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -223,6 +264,8 @@ pub fn get_provider(service: &str) -> Option<Box<dyn MediaProvider>> {
         "openai-tts" => Some(Box::new(openai_tts::OpenAiTtsProvider)),
         "elevenlabs" => Some(Box::new(elevenlabs::ElevenLabsProvider)),
         "qwen-tts" => Some(Box::new(qwen_tts::QwenTtsProvider)),
+        "qwen-image" => Some(Box::new(qwen_image::QwenImageProvider)),
+        "wan-video" | "happyhorse" => Some(Box::new(wan_video::WanVideoProvider)),
         "grok-video" => Some(Box::new(grok_video::GrokVideoProvider)),
         "veo" => Some(Box::new(veo::VeoProvider)),
         _ => None,
@@ -250,6 +293,9 @@ pub fn is_stub_provider(service: &str) -> bool {
             | "openai-tts"
             | "elevenlabs"
             | "qwen-tts"
+            | "qwen-image"
+            | "wan-video"
+            | "happyhorse"
             | "grok-video"
             | "veo"
             | "anthropic"
@@ -269,7 +315,7 @@ pub fn api_key_env(service: &str) -> &'static str {
         "suno" => "SUNO_API_KEY",
         "openai-tts" => "OPENAI_API_KEY",
         "elevenlabs" => "ELEVENLABS_API_KEY",
-        "qwen-tts" => "DASHSCOPE_API_KEY",
+        "qwen-tts" | "qwen-image" | "wan-video" | "happyhorse" => "DASHSCOPE_API_KEY",
         "grok-video" => "XAI_API_KEY",
         "anthropic" => "ANTHROPIC_API_KEY",
         "gemini-chat" => "GEMINI_API_KEY",
@@ -381,6 +427,9 @@ pub fn default_model(service: &str) -> &'static str {
         "openai-tts" => "gpt-4o-mini-tts",
         "elevenlabs" => "eleven_multilingual_v2",
         "qwen-tts" => "qwen3-tts-flash",
+        "qwen-image" => "qwen-image-3.0",
+        "wan-video" => "wan2.7-t2v",
+        "happyhorse" => "happyhorse-1.1-t2v",
         "grok-video" => "grok-imagine-video",
         "veo" => "veo-3.0-generate-001",
         "anthropic" => "claude-sonnet-4-6",
