@@ -1,6 +1,10 @@
 ---
 name: content-media-engine
 description: >
+  Research trends, validate demand, and generate text-based media from
+  .media.prompt files (diagrams, SVG, HTML, docs, notation). Use for keyword
+  mining, abstracts, calendars, funnels, or LLM-generated markup.
+extended_description: >
   Research trends, validate topics, generate article ideas, create abstracts, optimize
   content for specific platforms, and generate text-based media assets from .media.prompt
   YAML files via LLM chat completion APIs. Use this skill when the user wants to research
