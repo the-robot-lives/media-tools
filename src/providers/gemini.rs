@@ -13,7 +13,7 @@ const INITIAL_BACKOFF_SECS: u64 = 2;
 /// Legacy predict-endpoint path; kept for reference, no longer dispatched
 /// (Google removed `:predict` support for image models).
 #[allow(dead_code)]
-const GENERATE_CONTENT_MODEL: &str = "gemini-2.5-flash-image";
+const GENERATE_CONTENT_MODEL: &str = "gemini-3.1-flash-image";
 
 pub struct GeminiProvider;
 

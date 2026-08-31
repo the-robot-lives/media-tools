@@ -5,6 +5,7 @@ mod fim;
 mod output;
 mod pipeline;
 mod prep;
+mod provider_config;
 mod providers;
 mod refine;
 mod renderers;
@@ -130,6 +131,9 @@ async fn main() -> color_eyre::Result<()> {
 
     // Load .envrc.k8.dc for API keys (GEMINI, SUNO, OPENAI, ELEVENLABS, DASHSCOPE)
     try_load_envrc();
+
+    // Load runtime provider/model overrides (local or remote YAML)
+    provider_config::init().await;
 
     if let Some(Commands::Lab {
         port,
