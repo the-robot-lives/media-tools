@@ -9,7 +9,7 @@ use crate::providers::{get_provider, GenerationOptions};
 use crate::schema::ParsedPrompt;
 use crate::ui;
 
-const REFINE_MODEL: &str = "gemini-2.0-flash";
+const REFINE_MODEL: &str = "gemini-3.7-flash";
 
 // ⟦𓈩𓅏𓇩𓐁⟧ interactive_refine_loop :: auto-generated pointer for public function interactive_refine_loop
 pub async fn interactive_refine_loop(
@@ -116,7 +116,10 @@ async fn refine_prompt_via_llm(
 ) -> Option<String> {
     let url = format!(
         "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-        REFINE_MODEL, api_key
+        crate::provider_config::loaded()
+            .and_then(|c| c.refine_model.as_deref())
+            .unwrap_or(REFINE_MODEL),
+        api_key
     );
 
     let body = json!({

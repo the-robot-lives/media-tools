@@ -92,10 +92,28 @@ pub fn candidates_for(
 ) -> Vec<Candidate> {
     match asset_type {
         AssetType::Image => match quality {
+            // YAML override (media-tool.yaml image_tiers) wins over the built-in ladder
+            Quality::Low
+            | Quality::Medium
+            | Quality::High
+                if crate::provider_config::loaded()
+                    .and_then(|c| c.image_tiers.get(crate::provider_config::tier_key(quality)))
+                    .is_some() =>
+            {
+                let cfg = crate::provider_config::loaded().expect("checked above");
+                let key = crate::provider_config::tier_key(quality);
+                crate::provider_config::parse_candidates(
+                    cfg.image_tiers.get(key).expect("checked above"),
+                )
+            }
             Quality::Low => vec![
                 Candidate {
                     service: "gemini",
-                    model: "imagen-4.0-fast-generate-001",
+                    model: "gemini-3.1-flash-lite-image",
+                },
+                Candidate {
+                    service: "gemini",
+                    model: "gemini-3.1-flash-image",
                 },
                 Candidate {
                     service: "qwen-image",
@@ -105,7 +123,11 @@ pub fn candidates_for(
             Quality::Medium => vec![
                 Candidate {
                     service: "gemini",
-                    model: "imagen-4.0-generate-001",
+                    model: "gemini-3.1-flash-image",
+                },
+                Candidate {
+                    service: "gemini",
+                    model: "gemini-3.1-flash-lite-image",
                 },
                 Candidate {
                     service: "qwen-image",
@@ -115,11 +137,11 @@ pub fn candidates_for(
             Quality::High => vec![
                 Candidate {
                     service: "gemini",
-                    model: "imagen-4.0-ultra-generate-001",
+                    model: "gemini-3-pro-image",
                 },
                 Candidate {
                     service: "gemini",
-                    model: "imagen-4.0-generate-001",
+                    model: "gemini-3.1-flash-image",
                 },
                 Candidate {
                     service: "qwen-image",
@@ -231,7 +253,7 @@ pub fn candidates_for(
 
         AssetType::Unknown => vec![Candidate {
             service: "gemini",
-            model: "imagen-4.0-generate-001",
+            model: "gemini-3.1-flash-image",
         }],
     }
 }
@@ -402,6 +424,14 @@ pub struct ProviderConstraints {
 
 // ⟦𓋠𓃽𓁒𓉵⟧ constraints :: auto-generated pointer for public function constraints
 pub fn constraints(service: &str) -> ProviderConstraints {
+    // YAML override (media-tool.yaml max_prompt_chars) wins over the built-in table
+    if let Some(cfg) = crate::provider_config::loaded() {
+        if let Some(max) = cfg.max_prompt_chars.get(service) {
+            return ProviderConstraints {
+                max_prompt_chars: Some(*max),
+            };
+        }
+    }
     match service {
         // Suno music: 3000 in custom mode (auto-enabled). Sounds endpoint: 500.
         // Use 3000 here; SFX constraint enforced via suno-sfx key below.
@@ -428,8 +458,14 @@ pub fn constraints(service: &str) -> ProviderConstraints {
 
 // ⟦𓐧𓉱𓍻𓉋⟧ default_model :: auto-generated pointer for public function default_model
 pub fn default_model(service: &str) -> &'static str {
+    // YAML override (media-tool.yaml defaults) wins over the built-in table
+    if let Some(cfg) = crate::provider_config::loaded() {
+        if let Some(model) = cfg.defaults.get(service) {
+            return model.as_str();
+        }
+    }
     match service {
-        "gemini" => "imagen-4.0-generate-001",
+        "gemini" => "gemini-3.1-flash-image",
         "suno" => "V5_5",
         "openai-tts" => "gpt-4o-mini-tts",
         "elevenlabs" => "eleven_multilingual_v2",
@@ -457,9 +493,9 @@ mod tests {
     #[test]
     fn image_candidates_by_quality() {
         let low = candidates_for(AssetType::Image, AudioKind::Voice, Quality::Low);
-        assert_eq!(low[0].model, "imagen-4.0-fast-generate-001");
+        assert_eq!(low[0].model, "gemini-3.1-flash-lite-image");
         let high = candidates_for(AssetType::Image, AudioKind::Voice, Quality::High);
-        assert!(high.iter().any(|c| c.model.contains("ultra")));
+        assert!(high.iter().any(|c| c.model == "gemini-3-pro-image"));
     }
 
     #[test]
