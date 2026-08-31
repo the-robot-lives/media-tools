@@ -3,7 +3,7 @@ static-site:
   fullnameOverride: media-tool-landing
   domain: media-tool.therobotlives.com
   # Bootstrap tag placeholder until CI bump-chart owns sha-<7> on first main push.
-  image: ops.noizu.com/media-tool.therobotlives.com/web:sha-bootstrap
+  image: ops.noizu.com/media-tool.therobotlives.com/web:sha-607932d
   # media_tool_web BEAM release listens on 8132 (web/config/config.exs).
   port: 8132
   imagePullSecrets:
