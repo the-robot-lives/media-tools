@@ -1,0 +1,41 @@
+# Direction 1 — Terminal Tessera (code-as-hero)
+# Dark editorial hero: a floating glass panel of literal .media.prompt YAML,
+# indigo accent, monospaced typography, subtle prism refraction on the edges.
+schema: "0.4"
+id: mdtool-dir-01-terminal-tessera
+type: image
+quality: high
+
+prompt:
+  text: "Dark editorial tech hero image: a single floating frosted-glass panel displaying YAML code (indented key-value lines, visible words 'schema' and 'quality'), tilted slightly in 3D perspective, glowing indigo-violet edge light, deep near-black navy background with faint geometric hexagon watermark, monospaced typography, cinematic rim lighting, generous negative space on the left for headline text"
+  negative: "cartoon, cluttered, multiple panels, human figures, logos, readable full paragraphs, watermark text"
+
+output:
+  formats:
+    - format: png
+      quality: 100
+    - format: webp
+      quality: 85
+  dimensions:
+    width: 1440
+    height: 900
+    aspect_ratio: "16:10"
+
+tags: [media-tool, hero, dark]
+product_targets: [hero-image, og-card]
+
+eval:
+  pass_threshold: 0.75
+  required_pass: [relevance]
+  criteria:
+    relevance:
+      weight: 3
+      description: "Single YAML code panel is the unmistakable subject"
+    composition:
+      weight: 2
+      description: "Left-side negative space fits a headline; panel not centered"
+    technical:
+      weight: 2
+      description: "Clean glass edges, no garbled text-like noise dominating"
+  reject_if:
+    - "large blocks of pseudo-text that look like spam"

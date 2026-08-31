@@ -1,0 +1,204 @@
+<!-- HEADER -->
+<section class="page-head">
+  <div class="container">
+    <p class="eyebrow">Schema 0.4</p>
+    <h1>The .media.prompt format</h1>
+    <p class="lede">
+      A <code>.media.prompt</code> file is declarative YAML. One file describes one asset:
+      what to generate, at what quality, for which output formats, and what "correct" looks
+      like. The name before the extension becomes the output filename.
+    </p>
+  </div>
+</section>
+
+<!-- MINIMAL -->
+<section class="section" id="minimal">
+  <div class="container split">
+    <div class="split-copy">
+      <h2>Start minimal</h2>
+      <p>
+        Two required blocks: the prompt and the output. Omit <code>service:</code> and the
+        tool selects a provider from the quality tier — you describe intent, not vendors.
+      </p>
+      <ul class="check-list" role="list">
+        <li><code>quality:</code> low | medium | high drives provider selection</li>
+        <li><code>negative:</code> exclusions travel with every attempt</li>
+        <li>Dimensions and aspect ratio are declared, not guessed</li>
+      </ul>
+    </div>
+    <div class="code-panel">
+{%raw}<pre><code><span class="c"># logo.media.prompt</span>
+schema: <span class="s">"0.4"</span>
+id: logo-001
+type: image
+quality: medium            <span class="c"># low | medium | high</span>
+
+prompt:
+  text: <span class="s">"Minimal geometric logomark, blue hexagons on dark background"</span>
+  negative: <span class="s">"realistic, photographic, text"</span>
+
+output:
+  formats:
+    - format: png
+  dimensions:
+    width: 1024
+    height: 1024
+    aspect_ratio: <span class="s">"1:1"</span></code></pre>{/raw}
+    </div>
+  </div>
+</section>
+
+<!-- FULL EXAMPLE -->
+<section class="section section-alt" id="full">
+  <div class="container">
+    <h2>Then grow up</h2>
+    <p class="section-lede">
+      The same schema carries attachments, dependency references, multi-format output,
+      post-processing, and eval criteria. Here's a landing-page hero that consumes a sibling
+      asset:
+    </p>
+    <div class="code-panel wide">
+{%raw}<pre><code><span class="c"># hero-page.media.prompt</span>
+schema: <span class="s">"0.4"</span>
+id: hero-page-001
+type: image
+quality: high
+
+depends_on:
+  - ref: logo-001
+    as: logo
+    collapse: file
+
+attachments:
+  - path: ./refs/brand-palette.png
+    role: style
+    description: <span class="s">"Match these brand colors"</span>
+
+prompt:
+  text: <span class="s">"SaaS landing page hero with logo in the nav bar, dark gradient, floating 3D shapes"</span>
+  negative: <span class="s">"wireframe, cluttered, light theme"</span>
+  provider_options:
+    safety_filter_level: BLOCK_MEDIUM_AND_ABOVE
+
+output:
+  formats:
+    - format: png
+      quality: 100
+    - format: webp
+      quality: 85
+  dimensions:
+    width: 1440
+    height: 900
+    aspect_ratio: <span class="s">"16:10"</span>
+
+post_processing:
+  - action: resize
+    params:
+      width: 1200
+      height: 750
+      fit: cover
+
+tags: [hero, landing]
+product_targets: [hero-image, og-card]
+
+eval:
+  pass_threshold: 0.75
+  required_pass: [relevance]
+  criteria:
+    relevance:
+      weight: 3
+      description: <span class="s">"Matches SaaS landing page intent"</span>
+    composition:
+      weight: 2
+      description: <span class="s">"Clear visual hierarchy"</span>
+    technical:
+      weight: 2
+      description: <span class="s">"Sharp, correct dimensions"</span>
+  reject_if:
+    - <span class="s">"obvious AI artifacts"</span></code></pre>{/raw}
+    </div>
+  </div>
+</section>
+
+<!-- DEPENDENCIES -->
+<section class="section" id="dependencies">
+  <div class="container">
+    <h2>Dependencies resolve as a DAG</h2>
+    <p class="section-lede">
+      <code>depends_on</code> entries name a sibling asset by <code>id</code> and bind it to
+      an alias. The engine parses, resolves tiers (cycles abort), generates in dependency
+      order, and substitutes the alias into the prompt — as a file attachment, inline data,
+      or context, per <code>collapse:</code>.
+    </p>
+    <div class="benefit-grid">
+      <article class="card">
+        <h3>File</h3>
+        <p><code>collapse: file</code> attaches the generated asset as an input file for image-to-image style reuse.</p>
+      </article>
+      <article class="card">
+        <h3>Inline</h3>
+        <p><code>collapse: inline</code> splices the asset's content into the prompt text.</p>
+      </article>
+      <article class="card">
+        <h3>Context</h3>
+        <p><code>collapse: context</code> passes a description of the asset for style/subject guidance.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- EVAL -->
+<section class="section section-alt" id="eval">
+  <div class="container split">
+    <div class="split-copy">
+      <h2>Make "good" a number</h2>
+      <p>
+        The <code>eval</code> block grades each candidate against weighted criteria (scored
+        0–10, normalized to a 0–1 pass threshold) with required passes and reject-if rules.
+        Failing grades trigger fallback to the next provider in the tier ladder — the best
+        attempt is kept with a warning if nothing passes.
+      </p>
+      <p>
+        Combined with <code>-n 3</code> variants, you get a cheap selection loop: generate
+        candidates, let your own criteria pick the winner.
+      </p>
+    </div>
+    <div class="code-panel">
+{%raw}<pre><code>eval:
+  pass_threshold: 0.7
+  criteria:
+    relevance:
+      weight: 3
+      description: <span class="s">"Hexagon motif, logo-style composition"</span>
+    technical:
+      weight: 3
+      description: <span class="s">"Clean edges, no artifacts"</span>
+  reject_if:
+    - <span class="s">"contains text or letterforms"</span></code></pre>{/raw}
+    </div>
+  </div>
+</section>
+
+<!-- OUTPUT NAMING -->
+<section class="section" id="naming">
+  <div class="container">
+    <h2>Predictable output naming</h2>
+    <p class="section-lede">Outputs land next to the prompt file. Variants and formats get deterministic suffixes:</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Input</th><th>Variants</th><th>Outputs</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>hero.media.prompt</code> (png)</td><td>1</td><td><code>hero.png</code></td></tr>
+          <tr><td><code>hero.media.prompt</code> (png)</td><td>3</td><td><code>hero.png</code>, <code>hero.2.png</code>, <code>hero.3.png</code></td></tr>
+          <tr><td><code>hero.media.prompt</code> (png, webp)</td><td>2</td><td><code>hero.png</code>, <code>hero.2.png</code>, <code>hero.webp</code>, <code>hero.2.webp</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Per-format <code>filename:</code> overrides rename any output. Existing files are skipped unless you pass <code>--force</code>.</p>
+    <div class="cta-row center">
+      <a class="btn btn-primary" href="/getting-started">Try it</a>
+    </div>
+  </div>
+</section>
