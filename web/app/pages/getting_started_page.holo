@@ -1,0 +1,122 @@
+<!-- HEADER -->
+<section class="page-head">
+  <div class="container">
+    <p class="eyebrow">Getting started</p>
+    <h1>From zero to generated</h1>
+    <p class="lede">
+      One binary, one YAML file, one command. Everything below runs locally — the only
+      external requirement is an API key for a provider you already use.
+    </p>
+  </div>
+</section>
+
+<!-- 1. INSTALL -->
+<section class="section" id="install">
+  <div class="container steps">
+    <div class="step">
+      <p class="step-num">1</p>
+      <div class="step-body">
+        <h2>Install</h2>
+        <p>Build from source with the Rust toolchain (or <code>make install</code>, which drops the binary into <code>~/.local/bin</code>):</p>
+{%raw}<pre><code>git clone https://github.com/the-robot-lives/media-tool.git
+cd media-tool
+make install          <span class="c"># cargo build --release + install</span>
+
+<span class="c"># or</span>
+cargo install --path .</code></pre>{/raw}
+      </div>
+    </div>
+
+    <div class="step">
+      <p class="step-num">2</p>
+      <div class="step-body">
+        <h2>Set a provider key</h2>
+        <p>Export the key for whichever provider your tier ladder starts with:</p>
+{%raw}<pre><code>export GEMINI_API_KEY=...     <span class="c"># gemini / gemini-chat / veo</span>
+<span class="c"># or</span>
+export DASHSCOPE_API_KEY=...  <span class="c"># qwen-image / qwen-tts / wan-video</span></code></pre>{/raw}
+      </div>
+    </div>
+
+    <div class="step">
+      <p class="step-num">3</p>
+      <div class="step-body">
+        <h2>Write your first prompt</h2>
+        <p><code>logo.media.prompt</code> — the filename becomes the output name:</p>
+{%raw}<pre><code>schema: <span class="s">"0.4"</span>
+id: logo-001
+type: image
+quality: medium
+
+prompt:
+  text: <span class="s">"Minimal geometric logomark, blue hexagons on dark background"</span>
+  negative: <span class="s">"realistic, photographic, text"</span>
+
+output:
+  formats:
+    - format: png
+  dimensions:
+    width: 1024
+    height: 1024
+    aspect_ratio: <span class="s">"1:1"</span></code></pre>{/raw}
+      </div>
+    </div>
+
+    <div class="step">
+      <p class="step-num">4</p>
+      <div class="step-body">
+        <h2>Preview the plan</h2>
+        <p>See exactly what would run — providers, models, dependency tiers — without spending a call:</p>
+{%raw}<pre><code>$ generate-media-prompt --dry-run --verbose .
+plan: 1 prompt · gemini:gemini-3.1-flash-image (medium) → logo.png [1024x1024]</code></pre>{/raw}
+      </div>
+    </div>
+
+    <div class="step">
+      <p class="step-num">5</p>
+      <div class="step-body">
+        <h2>Generate, then iterate</h2>
+        <p>Variants for selection, evals for quality, refine for taste:</p>
+{%raw}<pre><code>$ generate-media-prompt -n 3 logo.media.prompt   <span class="c"># 3 candidates, best eval kept</span>
+$ generate-media-prompt --refine logo.media.prompt <span class="c"># describe changes, regenerate</span>
+
+<span class="c"># batch a whole directory across zellij panes</span>
+$ generate-media-prompt -r ./assets/prompts -j 4</code></pre>{/raw}
+      </div>
+    </div>
+
+    <div class="step">
+      <p class="step-num">6</p>
+      <div class="step-body">
+        <h2>Explore the test lab</h2>
+        <p>Browse asset types, generate, view, and grade from a local UI:</p>
+{%raw}<pre><code>$ generate-media-prompt lab
+→ http://127.0.0.1:8787</code></pre>{/raw}
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- NEXT -->
+<section class="section section-alt" id="next">
+  <div class="container">
+    <h2>Where to go next</h2>
+    <div class="benefit-grid">
+      <article class="card">
+        <h3>The format</h3>
+        <p>Attachments, dependency DAGs, eval blocks, post-processing — the full schema 0.4 walkthrough.</p>
+        <a class="card-link" href="/format">Read the format →</a>
+      </article>
+      <article class="card">
+        <h3>Providers</h3>
+        <p>The implemented provider matrix, quality-tier ladders, and runtime overrides.</p>
+        <a class="card-link" href="/providers">See providers →</a>
+      </article>
+      <article class="card">
+        <h3>Extending</h3>
+        <p>The MediaProvider trait, runtime config, and how to fit generation into your pipelines.</p>
+        <a class="card-link" href="/extensibility">Extend it →</a>
+      </article>
+    </div>
+  </div>
+</section>

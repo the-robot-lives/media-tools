@@ -1,0 +1,41 @@
+# Direction 3 — Gradient Foundry (assets on an assembly line)
+# Warmer, more emotional angle: media assets (photo, waveform, film frame,
+# vector shape) as glowing tiles moving through a stylized foundry line.
+schema: "0.4"
+id: mdtool-dir-03-gradient-foundry
+type: image
+quality: high
+
+prompt:
+  text: "Stylized 3D illustration of a dark automated assembly line producing media: four glowing rounded tiles in a row showing an abstract image, an audio waveform, a film frame, and a vector polygon, carried on a sleek conveyor toward a bright violet-amber gradient light source, soft volumetric glow, matte dark-indigo environment, high contrast, wide composition with calm space at top-left for a headline"
+  negative: "realistic factory, robots, people, text, busy clutter, daylight, flat 2d"
+
+output:
+  formats:
+    - format: png
+      quality: 100
+    - format: webp
+      quality: 85
+  dimensions:
+    width: 1440
+    height: 900
+    aspect_ratio: "16:10"
+
+tags: [media-tool, hero, foundry]
+product_targets: [hero-image, og-card]
+
+eval:
+  pass_threshold: 0.75
+  required_pass: [relevance]
+  criteria:
+    relevance:
+      weight: 3
+      description: "Four distinct media-asset tiles on a single line, moving toward light"
+    composition:
+      weight: 2
+      description: "Top-left space usable for headline; tiles not cropped"
+    technical:
+      weight: 2
+      description: "Cohesive palette (indigo ground, violet-amber light), no artifacts"
+  reject_if:
+    - "tiles rendered as readable screenshots with dense text"

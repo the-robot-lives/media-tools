@@ -1,0 +1,7 @@
+apiVersion: v2
+name: media-tool-landing
+description: media-tool.therobotlives.com marketing site (Hologram)
+version: 0.1.0
+appVersion: "0.1.0"
+type: application
+# static-site subchart is vendored under charts/static-site (not a file:// dep).

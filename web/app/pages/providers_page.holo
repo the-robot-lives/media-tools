@@ -1,0 +1,119 @@
+<!-- HEADER -->
+<section class="page-head">
+  <div class="container">
+    <p class="eyebrow">Provider matrix</p>
+    <h1>Providers</h1>
+    <p class="lede">
+      media-tool ships with a provider registry spanning images, music, voice, and video —
+      plus text-capable chat providers for SVG, diagrams, and HTML. Pick by quality tier and
+      let the CLI walk the ladder, or pin <code>service:</code> when you need a specific
+      vendor.
+    </p>
+  </div>
+</section>
+
+<!-- IMPLEMENTED -->
+<section class="section" id="implemented">
+  <div class="container">
+    <h2>Implemented today</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Service</th><th>Type</th><th>Default model</th><th>API key</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>gemini</code></td><td>Image</td><td><code>imagen-4.0-generate-001</code></td><td><code>GEMINI_API_KEY</code></td></tr>
+          <tr><td><code>gemini-chat</code></td><td>Text / SVG / diagrams</td><td><code>gemini-2.5-flash</code></td><td><code>GEMINI_API_KEY</code></td></tr>
+          <tr><td><code>qwen-image</code></td><td>Image</td><td><code>qwen-image-3.0</code></td><td><code>DASHSCOPE_API_KEY</code></td></tr>
+          <tr><td><code>veo</code></td><td>Video</td><td><code>veo-3.0-generate-001</code></td><td><code>GEMINI_API_KEY</code></td></tr>
+          <tr><td><code>wan-video</code></td><td>Video</td><td><code>wan2.7-t2v</code></td><td><code>DASHSCOPE_API_KEY</code></td></tr>
+          <tr><td><code>grok-video</code></td><td>Video</td><td><code>grok-imagine-video</code></td><td><code>XAI_API_KEY</code></td></tr>
+          <tr><td><code>suno</code></td><td>Music</td><td><code>V4_5ALL</code></td><td><code>SUNO_API_KEY</code></td></tr>
+          <tr><td><code>openai-tts</code></td><td>Voice</td><td><code>gpt-4o-mini-tts</code></td><td><code>OPENAI_API_KEY</code></td></tr>
+          <tr><td><code>elevenlabs</code></td><td>Voice</td><td><code>eleven_multilingual_v2</code></td><td><code>ELEVENLABS_API_KEY</code></td></tr>
+          <tr><td><code>qwen-tts</code></td><td>Voice</td><td><code>qwen3-tts-flash</code></td><td><code>DASHSCOPE_API_KEY</code></td></tr>
+          <tr><td><code>anthropic</code></td><td>Text / diagrams</td><td><code>claude-sonnet-4-6</code></td><td><code>ANTHROPIC_API_KEY</code></td></tr>
+          <tr><td><code>openai-chat</code></td><td>Text</td><td><code>gpt-4.1</code></td><td><code>OPENAI_API_KEY</code></td></tr>
+          <tr><td><code>openrouter</code></td><td>Text</td><td><code>openai/gpt-4o-mini</code></td><td><code>OPENROUTER_API_KEY</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="footnote">
+      More providers (OpenAI images, Stability, Replicate, Ideogram, Recraft, ComfyUI, and
+      others) are stubbed in the registry and land as implementations — see
+      <a href="https://github.com/the-robot-lives/media-tool/blob/main/docs/providers.md" rel="noopener">docs/providers.md</a>.
+    </p>
+  </div>
+</section>
+
+<!-- QUALITY TIERS -->
+<section class="section section-alt" id="tiers">
+  <div class="container split">
+    <div class="split-copy">
+      <h2>Quality tiers, not vendor lock-in</h2>
+      <p>
+        Declare <code>quality: high</code> and the tool tries the tier ladder in order,
+        grading against your eval block and falling back on failure. The ladders — and the
+        default model per service — live in a runtime YAML config you can override without
+        rebuilding the binary.
+      </p>
+      <p>
+        Async providers (Veo, Wan, Grok video, Suno) poll their tasks to completion; sync
+        providers return directly. Long-running batches fan out across zellij panes with
+        <code>-j</code>.
+      </p>
+    </div>
+    <div class="code-panel">
+{%raw}<pre><code><span class="c"># media-tool.yaml (runtime override)</span>
+defaults:
+  gemini: gemini-3.1-flash-image
+
+image_tiers:
+  medium:
+    - gemini:gemini-3.1-flash-image
+    - gemini:gemini-3.1-flash-lite-image
+    - qwen-image:qwen-image-3.0
+  high:
+    - gemini:gemini-3-pro-image
+    - gemini:gemini-3.1-flash-image
+    - qwen-image:qwen-image-3.0-pro
+
+refine_model: gemini-3.7-flash</code></pre>{/raw}
+    </div>
+  </div>
+</section>
+
+<!-- PROVIDER OPTIONS -->
+<section class="section" id="options">
+  <div class="container">
+    <h2>Escape hatches when you need them</h2>
+    <div class="benefit-grid">
+      <article class="card">
+        <h3>Pin the service</h3>
+        <p>
+          <code>service:</code> plus optional <code>model:</code> bypass auto-selection —
+          useful when a specific vendor's edit is required for an asset.
+        </p>
+      </article>
+      <article class="card">
+        <h3>Pass provider options</h3>
+        <p>
+          <code>prompt.provider_options</code> carries provider-specific parameters —
+          safety filter levels, token limits, temperature — without polluting the prompt
+          text.
+        </p>
+      </article>
+      <article class="card">
+        <h3>Override per invocation</h3>
+        <p>
+          CLI flags <code>--service</code>, <code>--model</code>, and
+          <code>--quality</code> override any prompt file at runtime — handy for A/B-ing a
+          tier against the same asset.
+        </p>
+      </article>
+    </div>
+    <div class="cta-row center">
+      <a class="btn btn-primary" href="/extensibility">Adding your own provider</a>
+    </div>
+  </div>
+</section>

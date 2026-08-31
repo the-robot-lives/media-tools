@@ -1,0 +1,41 @@
+# Direction 2 — Blueprint DAG (engineering schematic)
+# Technical-drawing aesthetic: the depends_on dependency graph drawn as a
+# blueprint, grid paper, cyan linework on deep navy.
+schema: "0.4"
+id: mdtool-dir-02-blueprint-dag
+type: image
+quality: high
+
+prompt:
+  text: "Technical blueprint illustration of a small directed acyclic graph: five to seven rectangular nodes connected by thin cyan arrows flowing left to right, one node glowing as active, drawn in precise engineering linework on dark navy grid paper with faint measurement marks and corner registration marks, monospaced labels suggested as small dashes, wide cinematic composition with empty space on the left third"
+  negative: "photo, 3d render, colorful, warm tones, cartoon, text-heavy, human figures"
+
+output:
+  formats:
+    - format: png
+      quality: 100
+    - format: webp
+      quality: 85
+  dimensions:
+    width: 1440
+    height: 900
+    aspect_ratio: "16:10"
+
+tags: [media-tool, hero, blueprint]
+product_targets: [hero-image, og-card]
+
+eval:
+  pass_threshold: 0.75
+  required_pass: [relevance]
+  criteria:
+    relevance:
+      weight: 3
+      description: "Reads as a DAG schematic: nodes, directional edges, no cycles"
+    composition:
+      weight: 2
+      description: "Left third kept clear for headline overlay"
+    technical:
+      weight: 2
+      description: "Crisp linework, consistent grid, no muddy edges"
+  reject_if:
+    - "graph rendered as random scribble"

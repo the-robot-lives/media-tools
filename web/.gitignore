@@ -1,0 +1,5 @@
+/_build/
+/deps/
+priv/static/hologram/
+.elixir_ls/
+*.ez

@@ -1,0 +1,157 @@
+<!-- HERO -->
+<section class="hero" id="top">
+  <div class="container hero-inner">
+    <p class="eyebrow">Rust CLI · .media.prompt schema 0.4 · multi-provider</p>
+    <h1>Media generation you can commit.</h1>
+    <p class="lede">
+      <strong>media-tool</strong> turns AI media generation into versioned config. A
+      <code>.media.prompt</code> file declares the asset — type, quality tier, eval criteria,
+      dependencies — and <code>generate-media-prompt</code> resolves the best provider,
+      generates, grades, and falls back. No chat luck. Just files.
+    </p>
+    <div class="cta-row">
+      <a class="btn btn-primary btn-lg" href="/getting-started">Get started</a>
+      <a class="btn btn-ghost btn-lg" href="https://github.com/the-robot-lives/media-tool" rel="noopener">View on GitHub</a>
+    </div>
+    <p class="cta-fine"><em>Single Rust binary · no account · provider keys you already have</em></p>
+
+    <div class="terminal" role="img" aria-label="Terminal session showing a media.prompt generation run">
+{%raw}<div class="terminal-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="terminal-title">zellij — assets/</span></div>
+<pre><code>$ generate-media-prompt --dry-run --verbose assets/
+plan: 4 prompts · 1 dependency tier · gemini:gemini-3.1-flash-image (medium)
+
+$ generate-media-prompt -n 3 hero.media.prompt
+hero.png ✓ eval 0.86 (pass 0.75) · hero.2.png ✓ 0.81 · hero.3.png ✓ 0.72
+graded by eval criteria · best kept</code></pre>{/raw}
+    </div>
+  </div>
+</section>
+
+<!-- BENEFITS (3-up) -->
+<section class="section" id="why">
+  <div class="container">
+    <h2 class="visually-hidden">Why media-tool</h2>
+    <div class="benefit-grid">
+      <article class="card">
+        <h3>Prompts are config, not chat luck</h3>
+        <p>
+          A <code>.media.prompt</code> file is YAML under schema 0.4: prompt text, negatives,
+          output formats and dimensions, post-processing, tags. It lives in your repo, reviews
+          like code, and diffs across commits.
+        </p>
+      </article>
+      <article class="card">
+        <h3>Provider-portable by tier</h3>
+        <p>
+          Declare <code>quality: medium</code> instead of pinning a vendor. The CLI walks a
+          candidate ladder — Gemini Imagen, Qwen Image, and more — and falls back to the next
+          provider when one fails or grades poorly.
+        </p>
+      </article>
+      <article class="card">
+        <h3>Built for agentic pipelines</h3>
+        <p>
+          Deterministic resolution, <code>--dry-run</code> plans, dependency DAGs with alias
+          substitution, weighted eval criteria, and non-interactive
+          exit codes. Safe to call from CI, scripts, and agents.
+        </p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- FORMAT AT A GLANCE -->
+<section class="section section-alt" id="format-glance">
+  <div class="container split">
+    <div class="split-copy">
+      <p class="eyebrow">The format</p>
+      <h2>One file per asset. Real YAML.</h2>
+      <p>
+        No prompt-hosting service, no proprietary DSL — just a typed schema you can write by
+        hand or emit from a script. Quality tiers drive provider selection; eval criteria make
+        "good enough" a measurable number instead of a vibe.
+      </p>
+      <a class="btn btn-secondary" href="/format">Read the format spec</a>
+    </div>
+    <div class="code-panel">
+{%raw}<pre><code><span class="c"># logo.media.prompt</span>
+schema: <span class="s">"0.4"</span>
+id: logo-001
+type: image
+quality: medium   <span class="c"># low | medium | high</span>
+
+prompt:
+  text: <span class="s">"Minimal geometric logomark, blue hexagons on dark background"</span>
+  negative: <span class="s">"realistic, photographic, text"</span>
+
+output:
+  formats:
+    - format: png
+  dimensions:
+    width: 1024
+    height: 1024
+    aspect_ratio: <span class="s">"1:1"</span></code></pre>{/raw}
+    </div>
+  </div>
+</section>
+
+<!-- ASSET TYPES -->
+<section class="section" id="assets">
+  <div class="container">
+    <p class="eyebrow">Asset types</p>
+    <h2>Images to video, songs to SVG</h2>
+    <p class="section-lede">
+      Binary types route to generation APIs; text types (SVG, Mermaid diagrams, HTML) route to
+      text-capable chat providers and are written straight to disk.
+    </p>
+    <ul class="chip-row" role="list">
+      <li class="chip">image</li>
+      <li class="chip">music</li>
+      <li class="chip">voice</li>
+      <li class="chip">sfx</li>
+      <li class="chip">video</li>
+      <li class="chip">diagram</li>
+      <li class="chip">svg</li>
+      <li class="chip">html</li>
+      <li class="chip">component</li>
+    </ul>
+    <a class="btn btn-secondary" href="/providers">See the provider matrix</a>
+  </div>
+</section>
+
+<!-- PIPELINE FIT -->
+<section class="section section-alt" id="pipelines">
+  <div class="container">
+    <p class="eyebrow">Pipeline fit</p>
+    <h2>Deterministic enough to automate</h2>
+    <div class="benefit-grid">
+      <article class="card">
+        <h3>Plan before you spend</h3>
+        <p>
+          <code>--dry-run --verbose</code> prints the resolved generation plan — providers,
+          models, dependency tiers — without calling an API. Review it in a PR like any other
+          build step.
+        </p>
+      </article>
+      <article class="card">
+        <h3>Grade what you generate</h3>
+        <p>
+          Each prompt can carry an <code>eval</code> block: weighted criteria, a pass
+          threshold, and reject-if rules. Outputs are graded and the tool falls back to the
+          next provider until something passes.
+        </p>
+      </article>
+      <article class="card">
+        <h3>Compose with dependencies</h3>
+        <p>
+          <code>depends_on</code> references let a hero banner embed a generated logo by alias
+          into its prompt text. Tiers resolve in order; cycles abort loudly. Batch across
+          zellij panes with <code>-j</code>.
+        </p>
+      </article>
+    </div>
+    <div class="cta-row center">
+      <a class="btn btn-primary btn-lg" href="/getting-started">Generate your first asset</a>
+    </div>
+  </div>
+</section>
