@@ -138,6 +138,15 @@ fn text_format_solution(dir: &Path, text_format: &str) -> Option<PathBuf> {
 /// services with no generator solution file (e.g. chat-only services like anthropic/openai-chat).
 fn provider_solution(dir: &Path, service: &str) -> Option<PathBuf> {
     let svc = service.trim().to_lowercase();
+    // YAML override (media-tool.yaml prompt_guidance) wins over the built-in mapping
+    if let Some(cfg) = crate::provider_config::loaded() {
+        if let Some(name) = cfg.prompt_guidance.get(&svc) {
+            let p = dir.join(name);
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+    }
     let name: &str = match svc.as_str() {
         // image
         "gemini" => "providers/imagen.md", // Imagen via the gemini provider
