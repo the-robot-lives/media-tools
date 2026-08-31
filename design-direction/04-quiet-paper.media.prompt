@@ -1,0 +1,41 @@
+# Direction 4 — Quiet Paper (Swiss-minimal, light mode)
+# Editorial calm: near-white paper ground, one small YAML card, one geometric
+# hexagon logomark, huge whitespace. Inverse of the dark directions.
+schema: "0.4"
+id: mdtool-dir-04-quiet-paper
+type: image
+quality: high
+
+prompt:
+  text: "Minimal Swiss-design poster style composition on warm off-white paper texture: one small white card with faint grey YAML indentation lines positioned in the lower right third, one flat geometric hexagon outline in deep indigo above it, vast empty whitespace, single hairline rule across the upper third, museum-catalog restraint, soft even daylight, no gradients"
+  negative: "dark background, neon, 3d, gloss, clutter, multiple cards, text, people"
+
+output:
+  formats:
+    - format: png
+      quality: 100
+    - format: webp
+      quality: 85
+  dimensions:
+    width: 1440
+    height: 900
+    aspect_ratio: "16:10"
+
+tags: [media-tool, hero, minimal]
+product_targets: [hero-image, og-card]
+
+eval:
+  pass_threshold: 0.75
+  required_pass: [relevance]
+  criteria:
+    relevance:
+      weight: 3
+      description: "Exactly one YAML card and one hexagon mark on clean paper"
+    composition:
+      weight: 2
+      description: "Upper-left whitespace dominates; hairline rule balanced"
+    technical:
+      weight: 2
+      description: "Flat color fidelity, paper texture subtle, edges clean"
+  reject_if:
+    - "more than two visual elements"

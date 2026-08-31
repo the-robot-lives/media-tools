@@ -1,0 +1,52 @@
+# media-tool runtime provider/model configuration
+#
+# Loaded at startup (first match wins, all optional — absent keys fall back to
+# compiled-in defaults in src/providers/mod.rs):
+#   1. $MEDIA_TOOL_CONFIG        — path to this file OR an http(s) URL
+#   2. $MEDIA_TOOL_CONFIG_URL    — http(s) URL (e.g. a gist / S3 / CDN link)
+#   3. ./media-tool.yaml         (cwd)
+#   4. ~/.config/media-tool/media-tool.yaml
+#
+# Values below mirror the current compiled-in defaults; edit to tweak without
+# rebuilding.
+
+version: 1
+
+# Default model per service (overrides src/providers/mod.rs default_model).
+defaults:
+  gemini: gemini-3.1-flash-image
+  # gemini-chat: gemini-2.5-flash
+  # qwen-image: qwen-image-3.0
+
+# Image quality-tier ladders, best-first. Entries are "service:model"
+# (bare ids are treated as gemini models). Replaces the built-in ladder
+# for that tier entirely when present.
+image_tiers:
+  low:
+    - gemini:gemini-3.1-flash-lite-image
+    - gemini:gemini-3.1-flash-image
+    - qwen-image:qwen-image-3.0
+  medium:
+    - gemini:gemini-3.1-flash-image
+    - gemini:gemini-3.1-flash-lite-image
+    - qwen-image:qwen-image-3.0
+  high:
+    - gemini:gemini-3-pro-image
+    - gemini:gemini-3.1-flash-image
+    - qwen-image:qwen-image-3.0-pro
+
+# Max prompt chars per service (overrides providers::constraints).
+max_prompt_chars:
+  gemini: 4000
+  suno: 3000
+  suno-sfx: 500
+  veo: 1000
+  grok-video: 1000
+
+# Refine-loop chat model (fallback: src/refine.rs REFINE_MODEL).
+refine_model: gemini-3.7-flash
+
+# Per-service prompt-guidance doc, relative to the solutions dir
+# (overrides src/fim.rs provider_solution mapping).
+prompt_guidance:
+  # gemini: providers/gemini-image.md

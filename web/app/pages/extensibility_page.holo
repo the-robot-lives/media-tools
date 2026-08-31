@@ -1,0 +1,124 @@
+<!-- HEADER -->
+<section class="page-head">
+  <div class="container">
+    <p class="eyebrow">Extensibility</p>
+    <h1>Extend everything</h1>
+    <p class="lede">
+      Providers, quality ladders, refine models, eval criteria, prompt guidance — every
+      seam is exposed. media-tool is a Rust workspace built around one trait and one
+      config file, designed to be pulled into agentic pipelines rather than replace them.
+    </p>
+  </div>
+</section>
+
+<!-- PROVIDER TRAIT -->
+<section class="section" id="provider-trait">
+  <div class="container split">
+    <div class="split-copy">
+      <h2>New providers are one trait away</h2>
+      <p>
+        Generation backends implement the <code>MediaProvider</code> trait and register in
+        the provider module — <code>src/providers/gemini.rs</code> is the reference
+        implementation. The engine handles what's shared: schema validation, dependency
+        resolution, retry and fallback, async task polling, output naming, grading.
+      </p>
+      <ul class="check-list" role="list">
+        <li>Sync providers return files directly</li>
+        <li>Async providers (video, music) expose a poll hook</li>
+        <li>Chat providers emit text assets — SVG, Mermaid, HTML — via <code>text_format</code></li>
+        <li>Stubbed services parse config today, so prompts don't churn when they land</li>
+      </ul>
+    </div>
+    <div class="code-panel">
+{%raw}<pre><code><span class="c"># adding a provider, in three steps:</span>
+<span class="c"># 1. implement MediaProvider (see gemini.rs)</span>
+<span class="c"># 2. register it in src/providers/mod.rs</span>
+<span class="c"># 3. use it:</span>
+<span class="c">#</span>
+<span class="c"># my-asset.media.prompt</span>
+service: my-provider
+model: my-model-v2
+type: image
+<span class="c"># ...rest of schema 0.4 as usual</span></code></pre>{/raw}
+    </div>
+  </div>
+</section>
+
+<!-- RUNTIME CONFIG -->
+<section class="section section-alt" id="runtime-config">
+  <div class="container">
+    <h2>Runtime config, no rebuild</h2>
+    <p class="section-lede">
+      <code>media-tool.yaml</code> overrides compiled-in defaults at startup — resolved from
+      <code>$MEDIA_TOOL_CONFIG</code> (path or URL), then the working directory, then
+      <code>~/.config/media-tool/</code>. Tune model ladders for your fleet from a gist or an
+      S3 URL.
+    </p>
+    <div class="benefit-grid">
+      <article class="card">
+        <h3>Defaults &amp; ladders</h3>
+        <p>Per-service default models and per-tier candidate ladders, best-first — swap vendors fleet-wide with a YAML edit.</p>
+      </article>
+      <article class="card">
+        <h3>Constraints</h3>
+        <p>Max prompt chars per service keeps prompts inside provider limits before you spend a call.</p>
+      </article>
+      <article class="card">
+        <h3>Refine &amp; guidance</h3>
+        <p>The <code>--refine</code> chat model and per-service prompt-guidance docs are both configurable.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- EVAL + LAB -->
+<section class="section" id="eval-lab">
+  <div class="container split">
+    <div class="split-copy">
+      <h2>Eval criteria and a test lab</h2>
+      <p>
+        Eval criteria are data, not code: weighted criteria, required passes, and reject-if
+        strings travel inside each prompt file, so different assets can enforce different
+        bars. A criteria catalog documents proven patterns; the quality-selection docs
+        explain how grades drive fallback.
+      </p>
+      <p>
+        The built-in <strong>test lab</strong> (<code>generate-media-prompt lab</code>) serves
+        a local UI on port 8787 — browse asset types, fire off generations, view and grade
+        results, and synthesize prompt ideas interactively.
+      </p>
+    </div>
+    <div class="code-panel">
+{%raw}<pre><code><span class="c"># browse / generate / view / eval in a local UI</span>
+$ generate-media-prompt lab
+→ http://127.0.0.1:8787
+
+<span class="c"># override evaluator resolution at runtime</span>
+$ generate-media-prompt --eval-url http://grader:8000 \
+    --eval-model my-grader hero.media.prompt</code></pre>{/raw}
+    </div>
+  </div>
+</section>
+
+<!-- AGENTIC FIT -->
+<section class="section section-alt" id="agentic">
+  <div class="container">
+    <h2>Shaped for agents</h2>
+    <p class="section-lede">
+      media-tool is packaged as the content-media-engine skill and behaves the way tools
+      inside an agent loop need to behave:
+    </p>
+    <ul class="chip-row" role="list">
+      <li class="chip">single static binary</li>
+      <li class="chip">deterministic plan via --dry-run</li>
+      <li class="chip">diffable prompt files</li>
+      <li class="chip">structured eval verdicts</li>
+      <li class="chip">skip-existing output policy</li>
+      <li class="chip">--refine feedback loop</li>
+      <li class="chip">interactive test lab</li>
+    </ul>
+    <div class="cta-row center">
+      <a class="btn btn-primary btn-lg" href="/getting-started">Get started</a>
+    </div>
+  </div>
+</section>

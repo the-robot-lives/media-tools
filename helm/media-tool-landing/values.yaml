@@ -1,0 +1,26 @@
+static-site:
+  nameOverride: media-tool-landing
+  fullnameOverride: media-tool-landing
+  domain: media-tool.therobotlives.com
+  # Bootstrap tag placeholder until CI bump-chart owns sha-<7> on first main push.
+  image: ops.noizu.com/media-tool.therobotlives.com/web:sha-607932d
+  # media_tool_web BEAM release listens on 8132 (web/config/config.exs).
+  port: 8132
+  imagePullSecrets:
+    - name: ops-registry-secret
+  tls:
+    enabled: true
+    # Per-domain origin cert synced from Infisical (/apps/tls/therobotlives).
+    # NOTE: if secret therobotlives-com-tls already exists in this namespace
+    # (zone CA, creationPolicy conflict), set infisical.enabled=false —
+    # robocalc hit a 526 window while a second owner synced the same secret.
+    secretName: therobotlives-com-tls
+    infisical:
+      enabled: true
+      secretsPath: "/apps/tls/therobotlives"
+  ingress:
+    enabled: true
+    className: nginx
+    cloudflareOnly: true
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
