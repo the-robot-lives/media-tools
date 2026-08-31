@@ -10,6 +10,9 @@ use crate::ui;
 
 const MAX_RETRIES: u32 = 3;
 const INITIAL_BACKOFF_SECS: u64 = 2;
+/// Legacy predict-endpoint path; kept for reference, no longer dispatched
+/// (Google removed `:predict` support for image models).
+#[allow(dead_code)]
 const GENERATE_CONTENT_MODEL: &str = "gemini-2.5-flash-image";
 
 pub struct GeminiProvider;
@@ -24,13 +27,10 @@ impl MediaProvider for GeminiProvider {
         options: &GenerationOptions,
         attachments: &[LoadedAttachment],
     ) -> color_eyre::Result<bool> {
-        if attachments.is_empty() {
-            self.generate_predict(prompt_text, output_path, api_key, options)
-                .await
-        } else {
-            self.generate_content(prompt_text, output_path, api_key, options, attachments)
-                .await
-        }
+        // All gemini image models now require generateContent (`:predict` was
+        // removed from the API — returns 404 NOT_FOUND for image models).
+        self.generate_content(prompt_text, output_path, api_key, options, attachments)
+            .await
     }
 
     fn name(&self) -> &str {
@@ -39,7 +39,50 @@ impl MediaProvider for GeminiProvider {
 }
 
 impl GeminiProvider {
+    /// Aspect ratios accepted by generateContent's imageConfig; snap unknown
+    /// ratios (e.g. 16:10) to the nearest supported one.
+    const SUPPORTED_ASPECT_RATIOS: [(&'static str, f64); 14] = [
+        ("1:1", 1.0),
+        ("1:4", 0.25),
+        ("1:8", 0.125),
+        ("2:3", 2.0 / 3.0),
+        ("3:2", 1.5),
+        ("3:4", 0.75),
+        ("4:1", 4.0),
+        ("4:3", 4.0 / 3.0),
+        ("4:5", 0.8),
+        ("5:4", 1.25),
+        ("8:1", 8.0),
+        ("9:16", 9.0 / 16.0),
+        ("16:9", 16.0 / 9.0),
+        ("21:9", 21.0 / 9.0),
+    ];
+
+    fn snap_aspect_ratio(requested: &str) -> Option<&'static str> {
+        let value = Self::parse_ratio(requested)?;
+        Self::SUPPORTED_ASPECT_RATIOS
+            .iter()
+            .min_by(|a, b| {
+                (a.1 - value)
+                    .abs()
+                    .partial_cmp(&(b.1 - value).abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(name, _)| *name)
+    }
+
+    fn parse_ratio(ratio: &str) -> Option<f64> {
+        let (w, h) = ratio.split_once(':')?;
+        let w: f64 = w.trim().parse().ok()?;
+        let h: f64 = h.trim().parse().ok()?;
+        if h == 0.0 {
+            return None;
+        }
+        Some(w / h)
+    }
+
     /// Plain generation via the Imagen predict endpoint (no attachments).
+    #[allow(dead_code)]
     async fn generate_predict(
         &self,
         prompt_text: &str,
@@ -135,7 +178,7 @@ impl GeminiProvider {
             .provider_options
             .get("generate_content_model")
             .and_then(|v| v.as_str())
-            .unwrap_or(GENERATE_CONTENT_MODEL);
+            .unwrap_or(&options.model);
 
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
@@ -157,11 +200,15 @@ impl GeminiProvider {
             }));
         }
 
+        let mut generation_config = json!({ "responseModalities": ["TEXT", "IMAGE"] });
+        if let Some(ref ar) = options.aspect_ratio {
+            if let Some(snapped) = Self::snap_aspect_ratio(ar) {
+                generation_config["imageConfig"] = json!({ "aspectRatio": snapped });
+            }
+        }
         let body = json!({
             "contents": [{ "parts": parts }],
-            "generationConfig": {
-                "responseModalities": ["TEXT", "IMAGE"],
-            }
+            "generationConfig": generation_config,
         });
 
         if options.verbose {
