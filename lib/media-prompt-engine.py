@@ -463,7 +463,7 @@ def build_dependency_graph(prompts: list[dict]) -> list[dict]:
 # =============================================================================
 DEFAULT_MODEL = "imagen-4.0-generate-001"
 REFINE_MODEL = "gemini-2.0-flash"
-MAX_RETRIES = 3
+MAX_RETRIES = 9
 INITIAL_BACKOFF = 2.0  # seconds
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
