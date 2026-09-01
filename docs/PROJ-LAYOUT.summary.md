@@ -4,7 +4,9 @@
 media-tool/
 ├── src/                            # Rust source code
 │   ├── main.rs                     # CLI entry point
-│   ├── schema.rs                   # YAML prompt parsing
+│   ├── schema.rs                   # .media.prompt YAML parsing
+│   ├── structural.rs               # Structural format detection
+│   ├── provider_config.rs          # Runtime config loader (media-tool.yaml)
 │   ├── pipeline.rs                 # Generation pipeline
 │   ├── dag.rs                      # Dependency DAG resolution
 │   ├── attachments.rs              # File attachment handling
@@ -15,16 +17,23 @@ media-tool/
 │   ├── validate.rs                 # Output validation (SVG lint/fix)
 │   ├── fim.rs                      # FIM solution loader
 │   ├── ui.rs                       # Terminal UI
-│   ├── providers/                  # 13 provider implementations
-│   └── renderers/                  # 4 renderer implementations
+│   ├── providers/                  # 16 provider implementations
+│   ├── renderers/                  # 5 renderer implementations
+│   └── test_lab/                   # Local eval/test-lab web server
 ├── bin/                            # Bash wrapper + eval port-forward helper
 ├── lib/                            # Legacy Python engine
-├── demos/                          # Example .media.prompt files (8 asset types)
+├── web/                            # Phoenix + Hologram landing site (app, config, priv, test)
+├── helm/media-tool-landing/        # Helm chart for the landing site
+├── demos/                          # Example .media.prompt files (10 asset types)
+├── design-direction/               # Themed design mockup prompts
 ├── skill/content-media-engine/     # Claude Code skill definition (assets, references/fim)
-├── project-management/             # Personas (8) and user stories (100)
-├── docs/                           # Layout, provider, quality/eval docs
+├── scripts/                        # Utility scripts (live-eval-report.sh)
+├── project-management/             # Personas (8) and user stories (100+)
+├── docs/                           # Layout, arch, FAQ, howto, provider, quality/eval docs
+├── .github/workflows/ci.yml        # CI
 ├── Cargo.toml                      # Rust package config
 ├── Makefile                        # Build targets
+├── media-tool.yaml                 # Runtime provider/model config
 ├── HOW-TO.md                       # Quick-start prompt writing guide
 ├── LICENSE
 └── README.md                       # Full documentation
