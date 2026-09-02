@@ -167,7 +167,7 @@ A future integration would need:
 - A `constraints()` entry reflecting the **~512-token** prompt budget.
 - A `default_model` (e.g. a `flux-1-dev` / `flux-1.1-pro` / `flux-kontext-*` id — confirm the exact API id at wiring time).
 - An env var for the API key (BFL API) — name TBD (**not defined in `api_key_env` today**).
-- Note: FLUX's editing story overlaps media-tool's existing Gemini attachment path (`generateContent` on `gemini-2.5-flash-image`); a FLUX provider would give a second, instruction-edit-native option.
+- Note: FLUX's editing story overlaps media-tool's existing Gemini attachment path (`generateContent` on `gemini-3.1-flash-image`); a FLUX provider would give a second, instruction-edit-native option.
 
 ## See Also
 - Implemented image provider: [`imagen.md`](./imagen.md) (also natural-language; closest analog)
