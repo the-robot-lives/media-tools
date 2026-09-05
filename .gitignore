@@ -28,3 +28,6 @@ Thumbs.db
 tmp/
 lab-workspace/
 
+
+# Canonical worktree placement
+.claude/worktrees/
