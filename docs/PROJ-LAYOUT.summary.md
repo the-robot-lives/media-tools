@@ -35,6 +35,8 @@ media-tool/
 ├── Makefile                        # Build targets
 ├── media-tool.yaml                 # Runtime provider/model config
 ├── HOW-TO.md                       # Quick-start prompt writing guide
+├── CLAUDE.md                       # Claude Code agent guidance
+├── CHANGELOG.md
 ├── LICENSE
 └── README.md                       # Full documentation
 ```

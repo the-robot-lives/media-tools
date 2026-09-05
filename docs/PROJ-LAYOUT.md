@@ -67,6 +67,8 @@ media-tool/
 ├── Makefile                        # build, test, install, clean targets
 ├── media-tool.yaml                 # Runtime provider/model config (defaults, tiers, limits)
 ├── HOW-TO.md                       # Quick reference for writing .media.prompt files
+├── CLAUDE.md                       # Claude Code agent guidance (commands, monorepo rules)
+├── CHANGELOG.md                    # Release changelog
 ├── LICENSE                         # License file
 └── README.md                       # Full user documentation (schema, CLI, providers)
 ```

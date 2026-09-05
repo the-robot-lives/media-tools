@@ -51,6 +51,8 @@ graph TB
 | `skill/content-media-engine/` | Claude Code skill packaging: SKILL.md, prompt templates, FIM library |
 | `demos/` | Working `.media.prompt` examples per asset type (10 kinds incl. sfx, component, document) |
 
+→ *Components ↔ directories: see [PROJ-LAYOUT.md](PROJ-LAYOUT.md)*
+
 ## Provider Architecture
 
 Three provider categories, dispatched from a registry in `providers/mod.rs`:
