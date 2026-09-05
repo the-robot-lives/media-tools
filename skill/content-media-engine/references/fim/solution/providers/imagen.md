@@ -3,7 +3,7 @@
 Google's Imagen family is a text-to-image model served through the Gemini API (`generativelanguage.googleapis.com`). It reads **plain descriptive English**, not token-weighted tag soup — think of the prompt as a short design brief. Imagen 4 is the current generation and is notably strong at rendering legible in-image text (posters, packaging, signage), long descriptive prompts, and photoreal scenes. Access is paid API only (no open weights). In media-tool this is the **only implemented image provider**, wired as `service: gemini`.
 
 **Current model**: Imagen 4 (`imagen-4.0-*`, GA mid-2025) — Fast / Standard / Ultra tiers. **Access**: paid API (Gemini API key).
-**Wired in media-tool as**: `service: gemini` (see `src/providers/gemini.rs`). Reference-image edits route to `gemini-2.5-flash-image` via the `generateContent` endpoint.
+**Wired in media-tool as**: `service: gemini` (see `src/providers/gemini.rs`). Reference-image edits route to `gemini-3.1-flash-image` via the `generateContent` endpoint.
 
 > Version note (web-verified 2026-07): Imagen 4 is the shipping generation exposed as `imagen-4.0-generate-001` (standard), `imagen-4.0-fast-generate-001` (fast), and `imagen-4.0-ultra-generate-001` (ultra). Ultra's headline gain is text rendering. Sources: [Gemini API — Imagen docs](https://ai.google.dev/gemini-api/docs/imagen), [Imagen 4 prompting guide](https://www.atlabs.ai/blog/imagen-4-prompting-guide), [Imagen 4 Ultra overview](https://www.mindstudio.ai/blog/what-is-imagen-4-ultra-google).
 
@@ -90,7 +90,7 @@ morning light, cobblestone street, potted geraniums, warm and inviting.
 Note: one environment, one light source — layering three lighting states confuses the scene.
 
 ### How to condition on a reference image (edit / subject transfer)
-Attach one or more images; media-tool auto-routes to the `generateContent` edit path on `gemini-2.5-flash-image`. Write the instruction as plain language describing the desired change or how to use the reference.
+Attach one or more images; media-tool auto-routes to the `generateContent` edit path on `gemini-3.1-flash-image`. Write the instruction as plain language describing the desired change or how to use the reference.
 ```text
 # with an attached product photo:
 Place this exact sneaker on a concrete pedestal in a bright studio,
@@ -134,7 +134,7 @@ Practical exclusion strategy: **state what you want in the positive prompt** ("a
 - **No samplers / steps / CFG** exposed — Imagen abstracts the diffusion process; there is no `steps`, `sampler`, or `cfg_scale` knob.
 - **No user-set seed** in the media-tool wiring — outputs vary run to run; generate a small batch and pick.
 - **Quality tiers via model choice**: `fast` (speed/cost) → `standard` → `ultra` (max fidelity + best text). media-tool selects these by `Quality::Low/Medium/High`.
-- **Reference images**: attachments switch to the `generateContent` endpoint on `gemini-2.5-flash-image` (a.k.a. "Nano Banana"–class editing), enabling instruction-style edits and subject conditioning from supplied images.
+- **Reference images**: attachments switch to the `generateContent` endpoint on `gemini-3.1-flash-image` (a.k.a. "Nano Banana"–class editing), enabling instruction-style edits and subject conditioning from supplied images.
 - **Style control** is purely lexical: name the medium ("watercolor", "35mm film photo", "isometric 3D render", "flat vector illustration").
 - **`personGeneration`** gates how/whether people are rendered — accepted values are the Imagen enum (e.g. `dont_allow`, `allow_adult`, `allow_all`); availability varies by region/policy. Set it via `provider_options.person_generation` when a prompt legitimately needs people and is being filtered.
 - **`safetyFilterLevel`** tunes content filtering strictness (`block_low_and_above` … `block_only_high`-style enum). Pass via `provider_options.safety_filter_level`; leave default unless you have a specific policy reason.
@@ -169,7 +169,7 @@ Because there are no numeric knobs, your descriptive words *are* the control sur
 - **Service id**: `service: gemini` → `GeminiProvider` (`src/providers/gemini.rs`).
 - **Env var**: `GEMINI_API_KEY` (`api_key_env("gemini")` in `src/providers/mod.rs`).
 - **Models** (from `candidates_for` / `default_model`): `imagen-4.0-fast-generate-001` (Low), `imagen-4.0-generate-001` (Medium/default), `imagen-4.0-ultra-generate-001` (High).
-- **Endpoints**: no attachments → `…/models/{model}:predict` (Imagen); with attachments → `…/models/{generate_content_model}:generateContent` (default `gemini-2.5-flash-image`).
+- **Endpoints**: no attachments → `…/models/{model}:predict` (Imagen); with attachments → `…/models/{generate_content_model}:generateContent` (default `gemini-3.1-flash-image`).
 - **Top-level options read**: `aspect_ratio` → `aspectRatio`.
 - **`provider_options` keys honored** (see the `match` in `generate_predict`): `safety_filter_level` → `safetyFilterLevel`; `person_generation` → `personGeneration`; and `generate_content_model` (overrides the edit model when attachments are present). Other keys are ignored.
 - **Not forwarded**: `negative_prompt` (unused for Imagen), `duration_seconds` (video only), samplers/steps/seed (not modeled).
