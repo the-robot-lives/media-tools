@@ -11,7 +11,7 @@ use crate::providers::{
 };
 use crate::refine::interactive_refine_loop;
 use crate::renderers;
-use crate::schema::{AssetType, ParsedPrompt, Quality};
+use crate::schema::{AssetType, AudioKind, ParsedPrompt, Quality};
 use crate::ui;
 use crate::validate;
 
@@ -773,8 +773,8 @@ async fn run_eval_gated(
                     prompt.payload.prompt.text.clone()
                 };
 
-                // Use SFX-specific constraint when model targets sound generation
-                let constraint_key = if candidate.model.contains("SOUND") {
+                // Use SFX-specific constraint when the asset is a sound effect
+                let constraint_key = if svc == "suno" && prompt.meta.audio_kind == AudioKind::Sfx {
                     "suno-sfx"
                 } else {
                     svc
@@ -1107,7 +1107,7 @@ async fn run_legacy_variants(
         // happened in the outer loop for non-per-output cases).
         let raw_text = prompt.payload.prompt.text.clone();
 
-        let constraint_key = if candidate.model.contains("SOUND") {
+        let constraint_key = if svc == "suno" && prompt.meta.audio_kind == AudioKind::Sfx {
             "suno-sfx"
         } else {
             svc
@@ -1356,5 +1356,6 @@ fn build_options(model: &str, prompt: &ParsedPrompt, config: &PipelineConfig) ->
         provider_options: prompt.payload.prompt.provider_options.clone(),
         verbose: config.verbose,
         duration_seconds: prompt.meta.duration,
+        audio_kind: prompt.meta.audio_kind,
     }
 }

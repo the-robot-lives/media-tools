@@ -76,6 +76,7 @@ pub async fn interactive_refine_loop(
                     provider_options: prompt.payload.prompt.provider_options.clone(),
                     verbose,
                     duration_seconds: prompt.meta.duration,
+                    audio_kind: prompt.meta.audio_kind,
                 };
 
                 let refine_service = prompt.meta.service.as_deref().unwrap_or("gemini");

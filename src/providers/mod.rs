@@ -37,6 +37,8 @@ pub struct GenerationOptions {
     pub provider_options: HashMap<String, serde_yaml::Value>,
     pub verbose: bool,
     pub duration_seconds: Option<f64>,
+    /// Structural routing hint for audio providers (music vs sfx endpoint).
+    pub audio_kind: AudioKind,
 }
 
 // ---------------------------------------------------------------------------
@@ -196,13 +198,21 @@ pub fn candidates_for(
         },
 
         AssetType::Audio => match audio_kind {
-            AudioKind::Music => vec![Candidate {
-                service: "suno",
-                model: "V5_5",
-            }],
+            // Suno V6 family: V6 default/recommended, V6_MINI lightweight.
+            AudioKind::Music => match quality {
+                Quality::Low => vec![Candidate {
+                    service: "suno",
+                    model: "V6_MINI",
+                }],
+                Quality::Medium | Quality::High => vec![Candidate {
+                    service: "suno",
+                    model: "V6",
+                }],
+            },
+            // Sounds endpoint accepts the same V6 enum — no legacy SOUND model.
             AudioKind::Sfx => vec![Candidate {
                 service: "suno",
-                model: "V5_SOUND",
+                model: "V6",
             }],
             AudioKind::Voice => match quality {
                 Quality::Low => vec![
@@ -466,7 +476,7 @@ pub fn default_model(service: &str) -> &'static str {
     }
     match service {
         "gemini" => "gemini-3.1-flash-image",
-        "suno" => "V5_5",
+        "suno" => "V6",
         "openai-tts" => "gpt-4o-mini-tts",
         "elevenlabs" => "eleven_multilingual_v2",
         "qwen-tts" => "qwen3-tts-flash",
@@ -511,6 +521,26 @@ mod tests {
         assert_eq!(music[0].service, "suno");
         let voice = candidates_for(AssetType::Audio, AudioKind::Voice, Quality::Medium);
         assert!(voice.iter().any(|c| c.service == "openai-tts"));
+    }
+
+    #[test]
+    fn music_ladder_v6() {
+        let high = candidates_for(AssetType::Audio, AudioKind::Music, Quality::High);
+        assert_eq!(high[0].model, "V6");
+        let med = candidates_for(AssetType::Audio, AudioKind::Music, Quality::Medium);
+        assert_eq!(med[0].model, "V6");
+        let low = candidates_for(AssetType::Audio, AudioKind::Music, Quality::Low);
+        assert_eq!(low[0].model, "V6_MINI");
+    }
+
+    #[test]
+    fn sfx_routes_to_v6_by_kind() {
+        for q in [Quality::Low, Quality::Medium, Quality::High] {
+            let sfx = candidates_for(AssetType::Audio, AudioKind::Sfx, q);
+            assert_eq!(sfx[0].service, "suno");
+            assert_eq!(sfx[0].model, "V6");
+        }
+        assert_eq!(default_model("suno"), "V6");
     }
 
     #[test]

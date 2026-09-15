@@ -5,12 +5,192 @@ use serde_json::json;
 
 use crate::attachments::LoadedAttachment;
 use crate::providers::{GenerationOptions, MediaProvider};
+use crate::schema::AudioKind;
 use crate::ui;
 
-const DEFAULT_MODEL: &str = "V4_5ALL";
+const DEFAULT_MODEL: &str = "V6";
 const POLL_INTERVAL_SECS: u64 = 10;
 const MAX_POLL_ATTEMPTS: u32 = 120; // 20 minutes at 10s intervals
 const API_BASE: &str = "https://api.sunoapi.org";
+const RATE_LIMIT_RETRY_SECS: u64 = 30;
+
+/// Backoff decision for gateway rate limits (HTTP 429). Batch jobs over ~150
+/// files hit these; a single retry after a fixed wait clears most of them.
+/// Returns Some(delay_secs) only when one retry remains (retries_used == 0).
+fn retry_after_rate_limit(status: u16, retries_used: u32) -> Option<u64> {
+    if status == 429 && retries_used == 0 {
+        Some(RATE_LIMIT_RETRY_SECS)
+    } else {
+        None
+    }
+}
+
+/// Music duration must be 10–360 seconds (custom mode only).
+fn clamp_music_duration(secs: u32) -> u32 {
+    secs.clamp(10, 360)
+}
+
+/// Serialize weighting knobs as clean 2-decimal numbers.
+fn round2(v: f64) -> f64 {
+    (v * 100.0).round() / 100.0
+}
+
+/// Build the submit request (url + JSON body). Routing between the music and
+/// sounds endpoints is structural (AudioKind), not name-based.
+fn build_request(
+    prompt_text: &str,
+    model: &str,
+    options: &GenerationOptions,
+) -> (String, serde_json::Value) {
+    let callback_url = options
+        .provider_options
+        .get("callBackUrl")
+        .and_then(|v| v.as_str())
+        .unwrap_or("https://httpbin.org/post");
+
+    if options.audio_kind == AudioKind::Sfx {
+        // Sounds endpoint: prompt ≤500 chars (enforced upstream via the
+        // suno-sfx constraint), no duration field, model passthrough.
+        let sound_loop = options
+            .provider_options
+            .get("soundLoop")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let sound_tempo = options
+            .provider_options
+            .get("soundTempo")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(120) as u32;
+        let sound_key = options
+            .provider_options
+            .get("soundKey")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Any");
+        let grab_lyrics = options
+            .provider_options
+            .get("grabLyrics")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let b = json!({
+            "prompt": prompt_text,
+            "model": model,
+            "soundLoop": sound_loop,
+            "soundTempo": sound_tempo,
+            "soundKey": sound_key,
+            "grabLyrics": grab_lyrics,
+            "callBackUrl": callback_url,
+        });
+
+        (format!("{}/api/v1/generate/sounds", API_BASE), b)
+    } else {
+        // Music generation
+        let has_style = options
+            .provider_options
+            .get("style")
+            .and_then(|v| v.as_str())
+            .is_some();
+        let custom_mode = options
+            .provider_options
+            .get("customMode")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(has_style || prompt_text.len() > 200);
+
+        let instrumental = options
+            .provider_options
+            .get("instrumental")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        let mut b = json!({
+            "prompt": prompt_text,
+            "model": model,
+            "customMode": custom_mode,
+            "instrumental": instrumental,
+            "callBackUrl": callback_url,
+        });
+
+        if custom_mode {
+            if let Some(style) = options
+                .provider_options
+                .get("style")
+                .and_then(|v| v.as_str())
+            {
+                b["style"] = json!(style);
+            }
+            if let Some(title) = options
+                .provider_options
+                .get("title")
+                .and_then(|v| v.as_str())
+            {
+                b["title"] = json!(title);
+            }
+            if let Some(pid) = options
+                .provider_options
+                .get("personaId")
+                .and_then(|v| v.as_str())
+            {
+                b["personaId"] = json!(pid);
+            }
+            if let Some(pm) = options
+                .provider_options
+                .get("personaModel")
+                .and_then(|v| v.as_str())
+            {
+                b["personaModel"] = json!(pm);
+            }
+            // duration is a custom-mode-only knob, clamped to 10–360
+            if let Some(dur) = options.duration_seconds {
+                b["duration"] = json!(clamp_music_duration(dur.round() as u32));
+            }
+        }
+
+        if let Some(neg) = options.negative_prompt.as_deref().or_else(|| {
+            options
+                .provider_options
+                .get("negativeTags")
+                .and_then(|v| v.as_str())
+        }) {
+            b["negativeTags"] = json!(neg);
+        }
+
+        if let Some(vg) = options
+            .provider_options
+            .get("vocalGender")
+            .and_then(|v| v.as_str())
+        {
+            b["vocalGender"] = json!(vg);
+        }
+
+        for float_key in &["styleWeight", "weirdnessConstraint", "audioWeight"] {
+            if let Some(val) = options
+                .provider_options
+                .get(*float_key)
+                .and_then(|v| v.as_f64())
+            {
+                b[*float_key] = json!(round2(val));
+            }
+        }
+
+        (format!("{}/api/v1/generate", API_BASE), b)
+    }
+}
+
+async fn post_json(
+    client: &reqwest::Client,
+    url: &str,
+    api_key: &str,
+    body: &serde_json::Value,
+) -> Result<reqwest::Response, reqwest::Error> {
+    client
+        .post(url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(body)
+        .timeout(Duration::from_secs(30))
+        .send()
+        .await
+}
 
 pub struct SunoProvider;
 
@@ -30,140 +210,8 @@ impl MediaProvider for SunoProvider {
             &options.model
         };
 
-        let is_sfx =
-            model.contains("SOUND") || model.contains("sfx") || model.to_lowercase() == "sound";
-
-        let callback_url = options
-            .provider_options
-            .get("callBackUrl")
-            .and_then(|v| v.as_str())
-            .unwrap_or("https://httpbin.org/post");
-
-        // SFX uses a separate endpoint and request shape
-        let (url, body) = if is_sfx {
-            let sfx_model = "V5";
-            let sound_loop = options
-                .provider_options
-                .get("soundLoop")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let sound_tempo = options
-                .provider_options
-                .get("soundTempo")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(120) as u32;
-            let sound_key = options
-                .provider_options
-                .get("soundKey")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Any");
-
-            let mut b = json!({
-                "prompt": prompt_text,
-                "model": sfx_model,
-                "soundLoop": sound_loop,
-                "soundTempo": sound_tempo,
-                "soundKey": sound_key,
-                "grabLyrics": false,
-                "callBackUrl": callback_url,
-            });
-
-            if let Some(dur) = options.duration_seconds {
-                b["duration"] = json!(dur as u32);
-            }
-
-            (format!("{}/api/v1/generate/sounds", API_BASE), b)
-        } else {
-            // Music generation
-            let has_style = options
-                .provider_options
-                .get("style")
-                .and_then(|v| v.as_str())
-                .is_some();
-            let custom_mode = options
-                .provider_options
-                .get("customMode")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(has_style || prompt_text.len() > 200);
-
-            let instrumental = options
-                .provider_options
-                .get("instrumental")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true);
-
-            let mut b = json!({
-                "prompt": prompt_text,
-                "model": model,
-                "customMode": custom_mode,
-                "instrumental": instrumental,
-                "callBackUrl": callback_url,
-            });
-
-            if custom_mode {
-                if let Some(style) = options
-                    .provider_options
-                    .get("style")
-                    .and_then(|v| v.as_str())
-                {
-                    b["style"] = json!(style);
-                }
-                if let Some(title) = options
-                    .provider_options
-                    .get("title")
-                    .and_then(|v| v.as_str())
-                {
-                    b["title"] = json!(title);
-                }
-                if let Some(pid) = options
-                    .provider_options
-                    .get("personaId")
-                    .and_then(|v| v.as_str())
-                {
-                    b["personaId"] = json!(pid);
-                }
-                if let Some(pm) = options
-                    .provider_options
-                    .get("personaModel")
-                    .and_then(|v| v.as_str())
-                {
-                    b["personaModel"] = json!(pm);
-                }
-            }
-
-            if let Some(dur) = options.duration_seconds {
-                b["duration"] = json!(dur as u32);
-            }
-
-            if let Some(neg) = options.negative_prompt.as_deref().or_else(|| {
-                options
-                    .provider_options
-                    .get("negativeTags")
-                    .and_then(|v| v.as_str())
-            }) {
-                b["negativeTags"] = json!(neg);
-            }
-
-            if let Some(vg) = options
-                .provider_options
-                .get("vocalGender")
-                .and_then(|v| v.as_str())
-            {
-                b["vocalGender"] = json!(vg);
-            }
-
-            for float_key in &["styleWeight", "weirdnessConstraint", "audioWeight"] {
-                if let Some(val) = options
-                    .provider_options
-                    .get(*float_key)
-                    .and_then(|v| v.as_f64())
-                {
-                    b[*float_key] = json!(val);
-                }
-            }
-
-            (format!("{}/api/v1/generate", API_BASE), b)
-        };
+        let (url, body) = build_request(prompt_text, model, options);
+        let is_sfx = options.audio_kind == AudioKind::Sfx;
 
         if options.verbose {
             ui::verbose(&format!("POST {}", url));
@@ -174,7 +222,7 @@ impl MediaProvider for SunoProvider {
                 if prompt_text.len() > 120 { "..." } else { "" }
             ));
             if is_sfx {
-                ui::verbose(&format!("Model: V5 (sound generation), sfx=true"));
+                ui::verbose(&format!("Model: {} (sound generation)", model));
             } else {
                 ui::verbose(&format!("Model: {}", model));
             }
@@ -182,23 +230,29 @@ impl MediaProvider for SunoProvider {
 
         let client = reqwest::Client::new();
 
-        // Submit generation request
-        let resp = client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .timeout(Duration::from_secs(30))
-            .send()
-            .await;
-
-        let response = match resp {
+        // Submit generation request (single 429 retry for batch runs)
+        let mut response = match post_json(&client, &url, api_key, &body).await {
             Ok(r) => r,
             Err(e) => {
                 ui::fail_msg(&format!("Network error submitting to Suno: {}", e));
                 return Ok(false);
             }
         };
+
+        if let Some(wait) = retry_after_rate_limit(response.status().as_u16(), 0) {
+            ui::info(&format!(
+                "Suno rate limited (429) — waiting {}s before a single retry",
+                wait
+            ));
+            tokio::time::sleep(Duration::from_secs(wait)).await;
+            response = match post_json(&client, &url, api_key, &body).await {
+                Ok(r) => r,
+                Err(e) => {
+                    ui::fail_msg(&format!("Network error resubmitting to Suno: {}", e));
+                    return Ok(false);
+                }
+            };
+        }
 
         let status = response.status();
         if status.as_u16() == 401 || status.as_u16() == 403 {
@@ -235,17 +289,20 @@ impl MediaProvider for SunoProvider {
             API_BASE, task_id
         );
 
+        let mut poll_429_retried = false;
         for attempt in 1..=MAX_POLL_ATTEMPTS {
             tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_SECS)).await;
 
-            let poll_resp = client
-                .get(&poll_url)
-                .header("Authorization", format!("Bearer {}", api_key))
-                .timeout(Duration::from_secs(30))
-                .send()
-                .await;
+            let poll_get = || async {
+                client
+                    .get(&poll_url)
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .timeout(Duration::from_secs(30))
+                    .send()
+                    .await
+            };
 
-            let poll_response = match poll_resp {
+            let mut poll_response = match poll_get().await {
                 Ok(r) => r,
                 Err(e) => {
                     if options.verbose {
@@ -254,6 +311,26 @@ impl MediaProvider for SunoProvider {
                     continue;
                 }
             };
+
+            if let Some(wait) =
+                retry_after_rate_limit(poll_response.status().as_u16(), poll_429_retried as u32)
+            {
+                poll_429_retried = true;
+                ui::info(&format!(
+                    "Suno rate limited (429) on record-info — waiting {}s before a single retry",
+                    wait
+                ));
+                tokio::time::sleep(Duration::from_secs(wait)).await;
+                poll_response = match poll_get().await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        if options.verbose {
+                            ui::verbose(&format!("Poll retry failed: {}", e));
+                        }
+                        continue;
+                    }
+                };
+            }
 
             if !poll_response.status().is_success() {
                 if options.verbose {
@@ -390,5 +467,77 @@ impl SunoProvider {
                 Ok(false)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn opts(kind: AudioKind, model: &str) -> GenerationOptions {
+        GenerationOptions {
+            model: model.to_string(),
+            aspect_ratio: None,
+            negative_prompt: None,
+            provider_options: HashMap::new(),
+            verbose: false,
+            duration_seconds: None,
+            audio_kind: kind,
+        }
+    }
+
+    #[test]
+    fn sfx_routes_by_explicit_kind_not_name() {
+        // No "SOUND"/"sfx" in the model name — routing comes from AudioKind.
+        let (url, body) = build_request("rain on a tin roof", "V6", &opts(AudioKind::Sfx, "V6"));
+        assert!(url.ends_with("/api/v1/generate/sounds"));
+        assert_eq!(body["model"], "V6"); // passthrough, not hardcoded
+        assert!(body.get("duration").is_none()); // sounds endpoint has no duration field
+        assert_eq!(body["soundTempo"], 120);
+        assert_eq!(body["soundKey"], "Any");
+        assert_eq!(body["grabLyrics"], false);
+    }
+
+    #[test]
+    fn music_routes_to_generate_endpoint() {
+        let mut o = opts(AudioKind::Music, "V6");
+        o.provider_options
+            .insert("customMode".into(), serde_yaml::Value::Bool(true));
+        o.duration_seconds = Some(999.0);
+        let (url, body) = build_request("a slow ballad", "V6", &o);
+        assert!(url.ends_with("/api/v1/generate"));
+        assert_eq!(body["model"], "V6");
+        assert_eq!(body["duration"], 360); // clamped to the 10–360 window
+    }
+
+    #[test]
+    fn duration_clamped_to_10_360() {
+        assert_eq!(clamp_music_duration(5), 10);
+        assert_eq!(clamp_music_duration(180), 180);
+        assert_eq!(clamp_music_duration(400), 360);
+    }
+
+    #[test]
+    fn duration_omitted_outside_custom_mode() {
+        let mut o = opts(AudioKind::Music, "V6");
+        o.duration_seconds = Some(120.0);
+        let (_, body) = build_request("a song", "V6", &o);
+        assert!(body.get("duration").is_none());
+    }
+
+    #[test]
+    fn rate_limit_retries_once_then_fails() {
+        assert_eq!(retry_after_rate_limit(429, 0), Some(RATE_LIMIT_RETRY_SECS));
+        assert_eq!(retry_after_rate_limit(429, 1), None);
+        assert_eq!(retry_after_rate_limit(500, 0), None);
+        assert_eq!(retry_after_rate_limit(200, 0), None);
+    }
+
+    #[test]
+    fn weights_round_to_two_decimals() {
+        assert_eq!(round2(0.333_333_3), 0.33);
+        assert_eq!(round2(0.8), 0.8);
+        assert_eq!(round2(0.456_7), 0.46);
     }
 }
