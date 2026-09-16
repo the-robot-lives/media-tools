@@ -17,6 +17,17 @@ impl ChatProvider for ZaiProvider {
         options: &GenerationOptions,
         attachments: &[LoadedAttachment],
     ) -> color_eyre::Result<bool> {
+        // General z.ai API-key base. z.ai also runs a separate coding-plan
+        // endpoint (`https://api.z.ai/api/coding/paas/v4`, OpenAI-compatible)
+        // for coding-subscription accounts — see tobor-kit's
+        // `llm-inference/catalog.ts` `zai` entry, which defaults to that
+        // coding-plan base because it targets coding-plan subscribers
+        // specifically. That base is plausibly correct for a coding
+        // subscription and wrong for a general ZAI_API_KEY, so we do not
+        // default to it here and do not attempt to auto-detect which plan a
+        // key belongs to. Coding-plan subscribers can override the base URL
+        // per-provider once `provider_config`/`media-tool.yaml` grows a
+        // `base_url` override knob (not present yet — see docs/providers.md).
         openai_compatible_generate(
             "https://api.z.ai/v1/chat/completions",
             system_prompt,

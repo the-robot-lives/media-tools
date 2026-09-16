@@ -348,6 +348,19 @@ The engine dispatches to `CHAT_PROVIDERS` for text-generating types (component, 
 **Response:** `choices[0].message.content` → write to file.
 
 **Notes:** OpenAI-compatible chat completion API. Same request/response format.
+z.ai also runs a separate coding-plan endpoint,
+`https://api.z.ai/api/coding/paas/v4` (also OpenAI-compatible), used by
+coding-subscription accounts — see tobor-kit's `llm-inference/catalog.ts`
+`zai` entry, which defaults to it because it targets coding-plan
+subscribers specifically. That base is plausibly correct for a coding
+subscription and wrong for a general `ZAI_API_KEY`, so media-tool's
+`zai` provider intentionally keeps the general `/v1/chat/completions`
+base as its compiled-in default and does not attempt to auto-detect
+which plan a key belongs to. There is currently no `base_url` override
+knob in `ProviderConfig`/`media-tool.yaml` (only `defaults`, `image_tiers`,
+`max_prompt_chars`, `refine_model`, `prompt_guidance`) — a coding-plan
+subscriber cannot switch endpoints without a code change until one is
+added.
 
 **API Key Env:** `ZAI_API_KEY`
 

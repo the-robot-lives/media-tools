@@ -480,7 +480,10 @@ pub fn default_model(service: &str) -> &'static str {
         "groq" | "groq-chat" => DEFAULT_CHAT_MODEL,
         "openai-chat" => "gpt-4.1",
         "openrouter" | "openrouter-chat" => "openai/gpt-4o-mini",
-        "zai" | "z.ai" => "glm-4.6",
+        // Pinned to tobor-kit's llm-inference catalog default for the "zai"
+        // provider (Portfolio/Libs/tobor-kit/web/src/components/llm-inference/catalog.ts),
+        // the only in-repo evidence of z.ai's current flagship chat model.
+        "zai" | "z.ai" => "glm-5.3-flash",
         _ => "default",
     }
 }
@@ -559,6 +562,15 @@ mod tests {
         // xAI and z.ai are different vendors — their env vars must never collide.
         assert_ne!(api_key_env("grok-video"), api_key_env("zai"));
         assert_ne!(api_key_env("grok-video"), api_key_env("z.ai"));
+    }
+
+    /// Pins the z.ai default model to tobor-kit's llm-inference catalog
+    /// value, so a future edit doesn't silently drift back to an xAI model
+    /// name (as `grok-4.3` did) or to some other unpinned guess.
+    #[test]
+    fn zai_default_model_matches_tobor_kit_catalog() {
+        assert_eq!(default_model("zai"), "glm-5.3-flash");
+        assert_eq!(default_model("z.ai"), "glm-5.3-flash");
     }
 
     #[test]
