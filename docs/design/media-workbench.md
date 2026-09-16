@@ -451,18 +451,28 @@ solution docs for `abc`, `lilypond`, `musicxml`, `vexflow` already exist in
 Making the long tail work *ergonomically* — without pinning `service:`, with
 correct prep and eval — is a whitelist problem, not a rewrite. Each is small:
 
-| # | File:line | Problem | Fix |
+| # | File:line | Problem | Status |
 |---|---|---|---|
-| 1 | `schema.rs:356` | unknown type → `AssetType::Unknown` dead end | map to a generic text type, or let `is_chat_type()` consider `text_format` |
-| 2 | `providers/mod.rs:254-257` | **`Unknown` dispatches to a hardcoded Gemini _image_ model** | must be a chat ladder |
-| 3 | `pipeline.rs:1058-1071` | `_ => asset_type == Image` rejects unknown types as unsupported | accept text types |
-| 4 | `providers/mod.rs:242-252` | chat tier is one hardcoded `groq-chat` candidate for all qualities | add `chat_tiers` to `ProviderConfig` mirroring the existing `image_tiers` |
-| 5 | `pipeline.rs:626-645` | `effective_text_format` extension whitelist | registry-driven |
-| 6 | `prep.rs:55-96` | prep channel routing whitelist | registry-driven |
-| 7 | `eval.rs:360-412` | unknown extensions are "un-scorable", structural only | registry declares an eval hint |
+| 1 | `schema.rs:376-390` | unknown type → `AssetType::Unknown` dead end | **DONE** (PR #9) — `Unknown` added to `is_chat_type()` |
+| 2 | `providers/mod.rs:241-249` | **`Unknown` dispatched to a hardcoded Gemini _image_ model** | **DONE** (PR #9) — joins the chat arm; image candidate removed |
+| 3 | `pipeline.rs:1058-1071` | `_ => asset_type == Image` rejects unknown types | **NOT NEEDED** — that block sits in the `else` of `is_chat`; once `Unknown` is a chat type it is unreachable for it. Editing it would have been dead code. |
+| 4 | `providers/mod.rs:253-271`, `provider_config.rs:37-41` | chat tier was one hardcoded `groq-chat` candidate for all qualities | **DONE** (PR #9) — `chat_tiers` mirrors `image_tiers` |
+| 5 | `pipeline.rs:626-645` | `effective_text_format` extension whitelist | open — registry-driven (0c) |
+| 6 | `prep.rs:55-96` | prep channel routing whitelist | open — registry-driven (0c) |
+| 7 | `eval.rs:360-412` | unknown extensions are "un-scorable", structural only | open — registry declares an eval hint (0c) |
 
-Choke point **2** is the worst: an unrecognised type silently tries to generate
-an *image*. Fixing 1–4 alone unlocks the generic long tail; 5–7 make it good.
+Choke point **2** was the worst: an unrecognised type silently tried to generate
+an *image*. With 1/2/4 landed the generic long tail works; 5–7 make it good.
+
+**Second behaviour surface moved by PR #9:** `test_lab/server.rs:1135` shares
+`is_chat_type()`, so unknown-type prompts in the test lab are now pinned to the
+lab's configured LLM instead of auto-selecting. Consistent with the fix, but
+worth knowing it is not the only call site that changed.
+
+**Residual, out of scope:** a pinned non-chat service still wins — `type: gcode`
++ `service: gemini` is skipped with "generation not supported via gemini". That
+is correct behaviour (an explicit pin should not be silently overridden), not a
+gap.
 
 **Config extensibility caveat:** `provider_config.rs:24-46` exposes `image_tiers`
 only — the image ladder is swappable without a rebuild, but chat/audio/video
@@ -721,7 +731,7 @@ Add `source/media-tool` to `SUBDIRS` in `Portfolio/Utilities/Makefile` so
 
 | Phase | Deliverable | Gate |
 |---|---|---|
-| **0a** | Type-system unblock: choke points 1-4 (§4.4) — `Unknown` → chat not image, config-driven `chat_tiers` | an unregistered text type generates without pinning `service:` |
+| **0a** ✅ | Type-system unblock (§4.4) — `Unknown` → chat not image, config-driven `chat_tiers` | **DONE, PR #9** — 40 tests pass (was 36); `gcode` routes to chat |
 | **0b** | `[lib]` target, config additions (`keys`, `snippets`, `preferences`, `types`), cascade resolver + `explain` subcommand | CLI honours cascade; `explain` correct; tests green |
 | **0c** | Type registry + `types.d/`, choke points 5-7, first converter renderer (`abc2midi` or `lilypond`) | MIDI generates end-to-end from an ABC intermediate |
 | **1** | UniFFI annotations + generated Swift bindings, `session`/Run store | a Swift test harness round-trips a run, streams progress, and cancels mid-generation |
