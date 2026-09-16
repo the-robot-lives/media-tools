@@ -22,6 +22,7 @@ pub mod fim;
 pub mod orchestrator;
 pub mod output;
 pub mod pipeline;
+pub mod preferences;
 pub mod prep;
 pub mod provider_config;
 pub mod providers;
@@ -40,4 +41,5 @@ pub use orchestrator::{
     ResolvedInputs,
 };
 pub use pipeline::PipelineConfig;
+pub use preferences::{resolve as resolve_preferences, PreferenceSet, PromptFacts, Resolution};
 pub use schema::{parse_prompt_file, ParsedPrompt, Quality};
