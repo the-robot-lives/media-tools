@@ -108,7 +108,7 @@ final class CatalogTests: XCTestCase {
             "anthropic": "ANTHROPIC_API_KEY",
             "groq_chat": "GROQ_API_KEY",
             "openrouter": "OPENROUTER_API_KEY",
-            "zai": "XAI_API_KEY"
+            "zai": "ZAI_API_KEY"
         ]
         for (id, envVar) in expected {
             XCTAssertEqual(

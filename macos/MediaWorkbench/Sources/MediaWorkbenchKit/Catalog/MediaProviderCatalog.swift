@@ -11,7 +11,10 @@ import ToborKitUI
 /// `envVarName` is taken verbatim from `src/providers/mod.rs::api_key_env` —
 /// that table is authoritative, so the Settings screen's env hint names the
 /// same variable the CLI actually reads. Where the Rust table has no entry the
-/// value stays nil rather than inventing one.
+/// value stays nil rather than inventing one. This is a hand-copied mirror,
+/// not a generated one — `CatalogTests.testEnvVarNamesMatchTheRustTable`
+/// pins its own copy of the table, so a change to `api_key_env` will NOT
+/// fail here unless this list and that test are both updated to match.
 ///
 /// Modality comes straight from tobor-kit's ``LLMModality`` axis (PR #52):
 /// each entry's `modalities:` says what it produces (or, for a shared
@@ -85,14 +88,15 @@ public enum MediaProviderCatalog {
             defaultModel: nil,
             modalities: [.text]
         ),
-        // media-tool's `zai` service reads XAI_API_KEY (src/providers/mod.rs),
-        // not ZAI_API_KEY — the CLI table wins over the name's appearance.
+        // media-tool's `zai` service reads ZAI_API_KEY (src/providers/mod.rs)
+        // — `zai` is Zhipu GLM, not xAI; see fix/zai-api-key for the
+        // copy/paste bug this corrects.
         LLMProvider(
             id: "zai", label: "Z.ai (GLM)", group: .cloud,
             apiShape: .openAI,
             defaultBaseURL: URL(string: "https://api.z.ai/api/coding/paas/v4"),
             baseURLPlaceholder: "https://api.z.ai/api/coding/paas/v4",
-            envVarName: "XAI_API_KEY", requiresKey: true,
+            envVarName: "ZAI_API_KEY", requiresKey: true,
             defaultModel: nil,
             modalities: [.text]
         ),
