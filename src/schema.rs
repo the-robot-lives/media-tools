@@ -91,6 +91,11 @@ pub struct PromptPayload {
     pub tags: Vec<String>,
     #[serde(default)]
     pub product_targets: Vec<String>,
+    /// Design §4.2 — names of house-style snippets to compose into
+    /// `prompt.system`. Sits at the prompt-file layer of the cascade, so it
+    /// overrides any `snippets:` list a `preferences:` rule supplied.
+    #[serde(default)]
+    pub snippets: Vec<String>,
 }
 
 fn default_schema() -> String {
@@ -303,6 +308,15 @@ pub struct PromptMeta {
     pub id: String,
     /// Pinned service from YAML (None = auto-select)
     pub service: Option<String>,
+    /// Selector from the config `preferences:` cascade that supplied `service`,
+    /// when the cascade pinned it. `None` when the service came from the prompt
+    /// file, a CLI flag, or auto-selection.
+    ///
+    /// Carried here so a failure message can say *why* a provider the prompt
+    /// file never mentions was chosen. A cascade-pinned service does not fall
+    /// back to the ladder, so a missing key for it is fatal for that prompt —
+    /// and the user should not have to go hunting for the rule responsible.
+    pub service_provenance: Option<String>,
     pub model: Option<String>,
     pub schema_version: String,
     pub quality: Quality,
@@ -459,6 +473,7 @@ pub fn parse_prompt_file(path: &Path) -> color_eyre::Result<ParsedPrompt> {
         output_dir,
         id,
         service: payload.service.clone(),
+        service_provenance: None,
         model: payload.model.clone(),
         schema_version: payload.schema.clone(),
         quality,

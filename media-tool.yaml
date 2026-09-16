@@ -61,3 +61,70 @@ refine_model: gemini-3.7-flash
 # (overrides src/fim.rs provider_solution mapping).
 prompt_guidance:
   # gemini: providers/gemini-image.md
+
+# ---------------------------------------------------------------------------
+# snippets — named house-style prompt fragments (design §4.2)
+# ---------------------------------------------------------------------------
+# Referenced by name from a `preferences:` rule or from a prompt file's
+# `snippets: [name, ...]` key, composed in declared order and prepended to
+# `prompt.system`. Commented out by default: an empty library is a no-op.
+#
+# snippets:
+#   house-style: |
+#     Clean, confident, understated. No stock-photo gloss, no lens flare.
+#   brand-voice: |
+#     Dry, precise, never breathless. Understate the claim.
+
+# ---------------------------------------------------------------------------
+# preferences — CSS-style cascade (design §4.3)
+# ---------------------------------------------------------------------------
+# Selector -> overrides. Each matching layer PATCHES per field; it does not
+# replace the whole resolved set. Precedence, weakest to strongest:
+#
+#   0  "*"                          universal
+#   1  "type:<t>"                   media type
+#   2  "type:<t>[attr=v]", "tag:<t>"  qualified type / tag
+#   3  "id:<id>"                    a single prompt
+#   4  an explicit field in the .media.prompt file
+#   5  a CLI flag (--service / --model / --quality)
+#
+# Ties at equal specificity go to the LATER rule, as in CSS — so declaration
+# order in this file matters. A rule-supplied `service` behaves exactly like an
+# inline `service:` field: it PINS the provider and skips the quality ladder.
+#
+# Attribute selectors match the PRE-cascade prompt: a `quality` the cascade
+# itself produced does not feed back into matching. Supported attributes:
+# quality, format, service, model, text_format, tag, id.
+#
+# Run `generate-media-prompt explain <prompt-file>` to see which rule won each
+# field and what it beat. A malformed selector is warned about and skipped, not
+# fatal.
+#
+# preferences:
+#   "*":
+#     service: openai
+#     quality: med
+#     snippets: [house-style]
+#   "type:image":
+#     service: grok
+#   "type:image[quality=high]":
+#     model: imagen-4-ultra
+#   "tag:brand":
+#     snippets: [house-style, brand-voice]
+#   "id:hero-shot":
+#     service: grok
+
+# ---------------------------------------------------------------------------
+# types — open type registry (design §4.4) — PARSED BUT NOT YET ROUTED
+# ---------------------------------------------------------------------------
+# Accepted and exposed so a config carrying these round-trips, but nothing
+# consumes them yet: registry-driven routing (choke points 5-7) and the
+# packaged / per-user `types.d/*.yaml` search path are phase 0c.
+#
+# types:
+#   gcode:
+#     modality: text
+#     extension: gcode
+#     text_format: gcode
+#     default_service: anthropic
+#     system: "Emit only valid RS-274 G-code. Absolute coords. No commentary."

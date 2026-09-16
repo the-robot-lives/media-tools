@@ -96,6 +96,21 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Explain how the preference cascade resolves for a prompt file
+    Explain {
+        /// The .media.prompt file to explain
+        #[arg(value_name = "PROMPT_FILE")]
+        prompt: PathBuf,
+        /// Quality tier override applied before resolution: low|medium|high
+        #[arg(long, value_name = "TIER")]
+        quality: Option<String>,
+        /// Pin provider service (the `!important` layer)
+        #[arg(long, value_name = "SVC")]
+        service: Option<String>,
+        /// Override generation model (the `!important` layer)
+        #[arg(long, value_name = "ID")]
+        model: Option<String>,
+    },
     /// Interactive web lab: browse types, generate, view, and eval media
     Lab {
         /// Listen port (default 8787)
@@ -138,18 +153,34 @@ async fn main() -> color_eyre::Result<()> {
     // Load runtime provider/model overrides (local or remote YAML)
     provider_config::init().await;
 
-    if let Some(Commands::Lab {
-        port,
-        demos,
-        workspace,
-        open,
-        no_open,
-        verbose,
-    }) = cli.command
-    {
-        let open_browser = open && !no_open;
-        let cfg = test_lab::LabConfig::resolve(port, demos, workspace, verbose, open_browser)?;
-        return test_lab::run_lab(cfg).await;
+    match cli.command {
+        Some(Commands::Lab {
+            port,
+            demos,
+            workspace,
+            open,
+            no_open,
+            verbose,
+        }) => {
+            let open_browser = open && !no_open;
+            let cfg = test_lab::LabConfig::resolve(port, demos, workspace, verbose, open_browser)?;
+            return test_lab::run_lab(cfg).await;
+        }
+        Some(Commands::Explain {
+            prompt,
+            quality,
+            service,
+            model,
+        }) => {
+            let config = PipelineConfig {
+                quality_override: orchestrator::parse_quality_override(quality.as_deref())?,
+                service_override: service,
+                model_override: model,
+                ..explain_defaults()
+            };
+            return orchestrator::explain_prompt(&prompt, &config);
+        }
+        None => {}
     }
 
     if cli.variants < 1 {
@@ -241,6 +272,26 @@ fn install_terminal_subscriber() {
     let _ = tracing_subscriber::registry()
         .with(term_layer::TermLayer)
         .try_init();
+}
+
+/// Inert [`PipelineConfig`] for `explain`: nothing here is read by the cascade,
+/// which only consults `quality_override`, `service_override` and `model_override`.
+fn explain_defaults() -> PipelineConfig {
+    PipelineConfig {
+        variant_count: 1,
+        dry_run: true,
+        force: false,
+        model_override: None,
+        verbose: false,
+        refine: false,
+        quality_override: None,
+        service_override: None,
+        no_eval: true,
+        no_prep: true,
+        fim_enabled: false,
+        eval_url: None,
+        eval_model: None,
+    }
 }
 
 fn report_input_issues(issues: &[InputIssue]) {

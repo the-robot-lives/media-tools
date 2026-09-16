@@ -5,6 +5,7 @@ use crate::attachments::{load_attachments, validate_attachments};
 use crate::dag::topological_sort;
 use crate::eval::{evaluate_candidates, Evaluator};
 use crate::output::{genai_candidate_path, link_active, resolve_output_paths, write_metadata};
+use crate::preferences;
 use crate::prep::PromptPrepper;
 use crate::providers::{
     self, api_key_env, available, candidates_for, constraints, get_chat_provider, get_provider,
@@ -54,11 +55,25 @@ pub async fn run_generation(
 
     // Dependency sort
     tel::step("Resolving dependencies");
-    let sorted_prompts = topological_sort(prompts)?;
+    let mut sorted_prompts = topological_sort(prompts)?;
     tel::ok(&format!(
         "{} prompt(s) in generation order",
         sorted_prompts.len()
     ));
+
+    // Preference cascade (design §4.3) + snippet composition (§4.2).
+    //
+    // Applied here, once, *before* anything reads `meta.service` /
+    // `meta.model` / `meta.quality`, so every downstream selection site
+    // (`resolve_candidates`, `resolve_display_service`, the dry-run plan)
+    // honours it without each having to know the cascade exists. A
+    // rule-supplied `service` lands in `meta.service` and is therefore a pin,
+    // exactly like an inline `service:` field.
+    //
+    // With no config, or a config declaring neither `preferences:` nor
+    // `snippets:`, nothing is written and nothing is printed — today's output
+    // byte for byte.
+    apply_preference_cascade(&mut sorted_prompts, config);
 
     if config.verbose {
         for (i, p) in sorted_prompts.iter().enumerate() {
@@ -305,8 +320,9 @@ pub async fn run_generation(
                     .collect()
             };
             tel::fail_msg(&format!(
-                "No available providers for {} — missing API keys: {}",
+                "No available providers for {}{} — missing API keys: {}",
                 prompt.meta.id,
+                preference_clause(&prompt),
                 needed.join(", ")
             ));
             failed += paths.len();
@@ -554,22 +570,137 @@ pub async fn run_generation(
     }
     tel::blank();
 
-    // Surface total failure as an error so lab jobs / CLI exit codes reflect reality.
-    // (Previously always Ok(()) even when every candidate 404'd — UI showed "Done" with 0 files.)
-    if succeeded == 0 && failed > 0 {
+    run_outcome(succeeded, failed)
+}
+
+/// Exit-code decision for a completed run.
+///
+/// **A partial failure is a failure.** If any output failed, the process exits
+/// non-zero — standard tooling behaviour, and the only way a caller scripting
+/// this tool can tell that something did not get made.
+///
+/// This gate previously fired only on `succeeded == 0 && failed > 0`, so a
+/// batch where some prompts succeeded and others failed returned `Ok(())` and
+/// exited 0, silently swallowing the failures. The preference cascade makes
+/// that shape materially more likely: a `preferences:` rule can pin a provider
+/// the prompt file never names, and a missing key for it fails only that
+/// prompt while the rest of the batch routes elsewhere and succeeds.
+///
+/// The total-failure message is unchanged, so runs that already exited
+/// non-zero report exactly what they reported before.
+fn run_outcome(succeeded: usize, failed: usize) -> color_eyre::Result<()> {
+    if failed == 0 {
+        return Ok(());
+    }
+    if succeeded == 0 {
         color_eyre::eyre::bail!(
             "Generation failed: 0 outputs written ({} attempt(s) failed). \
              Check API keys and model names (Groq default: openai/gpt-oss-120b).",
             failed
         );
     }
-
-    Ok(())
+    color_eyre::eyre::bail!(
+        "Generation partially failed: {} of {} output(s) failed, {} written. \
+         Check API keys and model names (Groq default: openai/gpt-oss-120b).",
+        failed,
+        succeeded + failed,
+        succeeded
+    );
 }
 
 // ---------------------------------------------------------------------------
 // Candidate resolution
 // ---------------------------------------------------------------------------
+
+/// Clause naming the `preferences:` rule that pinned a prompt's service, for
+/// failure messages. Empty when the service did not come from the cascade, so
+/// messages for prompt-file pins and auto-selection stay byte-for-byte unchanged.
+///
+/// A cascade-pinned service deliberately does not fall back to the quality
+/// ladder: provider choice here is an aesthetic decision, not a capacity one,
+/// and silently substituting a provider yields art that does not match what the
+/// author asked for. That makes a missing key fatal for the prompt, so the
+/// message has to name the rule or the user has no route back to the cause.
+fn preference_clause(prompt: &ParsedPrompt) -> String {
+    match prompt.meta.service_provenance {
+        Some(ref selector) => format!(" — selected by preference rule \"{selector}\""),
+        None => String::new(),
+    }
+}
+
+/// Per-run CLI/GUI override layer (cascade rank 5) derived from [`PipelineConfig`].
+// ⟦𓅃𓈍𓂘𓋘⟧ cli_overrides :: Per-run CLI/GUI override layer for the preference cascade.
+pub fn cli_overrides(config: &PipelineConfig) -> preferences::Overrides {
+    preferences::Overrides {
+        service: config.service_override.clone(),
+        model: config.model_override.clone(),
+        quality: config.quality_override.map(|q| q.as_str().to_string()),
+        // There is no `--snippets` flag; the GUI supplies this layer instead.
+        snippets: None,
+    }
+}
+
+/// Resolve and fold the preference cascade into every prompt in the batch.
+///
+/// Emission goes through [`crate::telemetry`], not `ui::*` directly: the warn
+/// lines ride the presentation channel and the applied settings also ride the
+/// typed `media_tool::progress` channel, so a GUI learns that a run's provider
+/// was chosen by config rather than by the prompt file.
+fn apply_preference_cascade(prompts: &mut [ParsedPrompt], config: &PipelineConfig) {
+    let prefs = preferences::PreferenceSet::from_config(crate::provider_config::loaded());
+    for err in &prefs.errors {
+        tel::warn_msg(&format!(
+            "media-tool config: ignoring preference `{}` \u{2014} {}",
+            err.selector, err.message
+        ));
+    }
+    let cli = cli_overrides(config);
+    for prompt in prompts.iter_mut() {
+        let facts = preferences::PromptFacts::from_prompt(prompt, config.quality_override);
+        let file = preferences::file_overrides(prompt);
+        let resolution = preferences::resolve(&prefs, &facts, &file, &cli);
+        let applied = preferences::apply(prompt, &resolution, &prefs);
+
+        for name in &applied.missing_snippets {
+            tel::warn_msg(&format!(
+                "{}: unknown snippet `{}` \u{2014} not defined under `snippets:`",
+                prompt.meta.id, name
+            ));
+        }
+        if applied.is_empty() {
+            continue;
+        }
+
+        progress::preferences_applied(
+            &prompt.meta.id,
+            applied.service.as_deref().unwrap_or(""),
+            applied.model.as_deref().unwrap_or(""),
+            applied.quality.map(|q| q.as_str()).unwrap_or(""),
+            applied.snippets.len(),
+        );
+
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(ref svc) = applied.service {
+            parts.push(format!("service={svc}"));
+        }
+        if let Some(ref model) = applied.model {
+            parts.push(format!("model={model}"));
+        }
+        if let Some(q) = applied.quality {
+            parts.push(format!("quality={}", q.as_str()));
+        }
+        if !applied.snippets.is_empty() {
+            parts.push(format!("snippets=[{}]", applied.snippets.join(", ")));
+        }
+        if !parts.is_empty() {
+            tel::info(&format!(
+                "{}: preferences \u{2192} {} (run `explain` for provenance)",
+                prompt.meta.id,
+                parts.join(", ")
+            ));
+        }
+    }
+}
 
 fn resolve_candidates(
     config: &PipelineConfig,
@@ -780,8 +911,11 @@ async fn run_eval_gated(
         let api_key = resolve_api_key(svc).unwrap_or_default();
         if api_key.is_empty() {
             tel::warn_msg(&format!(
-                "{} not set — skipping {} ({} provider)",
-                env_name, prompt.meta.id, svc
+                "{} not set — skipping {} ({} provider){}",
+                env_name,
+                prompt.meta.id,
+                svc,
+                preference_clause(prompt)
             ));
             continue;
         }
@@ -1232,8 +1366,11 @@ async fn run_legacy_variants(
     let api_key = resolve_api_key(svc).unwrap_or_default();
     if api_key.is_empty() {
         tel::warn_msg(&format!(
-            "{} not set — skipping {} ({} provider)",
-            env_name, prompt.meta.id, svc
+            "{} not set — skipping {} ({} provider){}",
+            env_name,
+            prompt.meta.id,
+            svc,
+            preference_clause(prompt)
         ));
         progress::output_completed(
             &prompt_id,
@@ -1637,6 +1774,92 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    // -- run_outcome: a partial failure is a failure ------------------------
+
+    #[test]
+    fn a_clean_run_succeeds() {
+        assert!(run_outcome(3, 0).is_ok());
+        assert!(run_outcome(0, 0).is_ok());
+    }
+
+    #[test]
+    fn a_total_failure_errors_with_the_unchanged_message() {
+        let err = run_outcome(0, 2).unwrap_err().to_string();
+        assert!(err.contains("0 outputs written"), "{err}");
+        assert!(err.contains("2 attempt(s) failed"), "{err}");
+    }
+
+    /// The bug this gate had: a mixed batch returned `Ok(())` and exited 0,
+    /// silently swallowing the failed prompt. The preference cascade makes this
+    /// shape likely — a rule pins a provider the prompt file never names, its
+    /// key is unset, and the rest of the batch succeeds.
+    #[test]
+    fn a_mixed_batch_with_any_failure_errors() {
+        let err = run_outcome(1, 1).unwrap_err().to_string();
+        assert!(err.contains("partially failed"), "{err}");
+        assert!(err.contains("1 of 2 output(s) failed"), "{err}");
+        assert!(err.contains("1 written"), "{err}");
+
+        // and it must hold for every mixed shape, not just 1/1
+        for (ok, bad) in [(1usize, 5usize), (5, 1), (9, 9)] {
+            assert!(
+                run_outcome(ok, bad).is_err(),
+                "{ok} succeeded / {bad} failed must be an error"
+            );
+        }
+    }
+
+    /// End-to-end over the real failure path, offline: a cascade-pinned service
+    /// whose key is unset is skipped at the `api_key.is_empty()` branch, which
+    /// `continue`s before any HTTP call. Both prompts fail, so this exercises
+    /// the plumbing from `run_generation` through to a non-zero outcome.
+    ///
+    /// The *mixed* case cannot be reached offline — a genuine success needs a
+    /// real provider call — so the success side is covered by `run_outcome`
+    /// above rather than end to end.
+    #[tokio::test]
+    async fn a_batch_that_wholly_fails_on_missing_keys_returns_err() {
+        let dir = scratch_dir("missing-keys");
+        let mut prompts = Vec::new();
+        for id in ["alpha", "beta"] {
+            let path = dir.join(format!("{id}.media.prompt"));
+            std::fs::write(
+                &path,
+                format!(
+                    "schema: \"0.4\"\nid: {id}\ntype: image\n\
+                     service: gemini\nprompt:\n  text: \"a test\"\n\
+                     output:\n  formats:\n    - format: png\n"
+                ),
+            )
+            .unwrap();
+            prompts.push(crate::schema::parse_prompt_file(&path).unwrap());
+        }
+
+        // Guarantee the key is absent for this process.
+        std::env::remove_var("GEMINI_API_KEY");
+        std::env::remove_var("GOOGLE_API_KEY");
+
+        let config = PipelineConfig {
+            variant_count: 1,
+            dry_run: false,
+            force: true,
+            model_override: None,
+            verbose: false,
+            refine: false,
+            quality_override: None,
+            service_override: None,
+            no_eval: true,
+            no_prep: true,
+            fim_enabled: false,
+            eval_url: None,
+            eval_model: None,
+        };
+
+        let result = run_generation(prompts, &config).await;
+        assert!(result.is_err(), "missing keys must not exit 0");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Bug 1 regression: when the LLM prepper replaces the declared negative, the
