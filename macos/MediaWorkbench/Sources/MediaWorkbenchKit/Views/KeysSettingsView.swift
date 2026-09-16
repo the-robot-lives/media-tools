@@ -44,16 +44,31 @@ public struct KeysSettingsView: View {
     // MARK: Provider list
 
     private var providerList: some View {
-        List(selection: $selectedProviderID) {
+        // Producers section by modality, one section per modality, exactly
+        // as before. Shared credentials (entries backing more than one
+        // producer, e.g. `dashscope`) get their own trailing section instead
+        // of being fanned across every modality section they touch — a
+        // credential isn't itself a generation target, so it doesn't belong
+        // among producers as though it were one.
+        let producers = MediaProviderCatalog.producerProviders
+        let sharedCredentials = MediaProviderCatalog.sharedCredentialProviders
+        return List(selection: $selectedProviderID) {
             if let loadError {
                 Text(loadError)
                     .font(.footnote)
                     .foregroundStyle(.red)
             }
-            ForEach(LLMProvider.modalities(in: MediaProviderCatalog.all), id: \.self) { modality in
+            ForEach(LLMProvider.modalities(in: producers), id: \.self) { modality in
                 Section(modality.label) {
-                    ForEach(MediaProviderCatalog.providers(in: modality)) { provider in
+                    ForEach(LLMProvider.providers(in: producers, matching: modality)) { provider in
                         row(for: provider).tag(provider.id)
+                    }
+                }
+            }
+            if !sharedCredentials.isEmpty {
+                Section("Shared Credentials") {
+                    ForEach(sharedCredentials) { provider in
+                        row(for: provider, subtitle: backsSubtitle(for: provider)).tag(provider.id)
                     }
                 }
             }
@@ -61,20 +76,28 @@ public struct KeysSettingsView: View {
         .listStyle(.sidebar)
     }
 
-    private func row(for provider: LLMProvider) -> some View {
-        HStack(spacing: 8) {
+    /// "Backs qwen-image, qwen-tts, wan-video" — the terse relationship line
+    /// a shared-credential row shows in place of the usual configured /
+    /// unconfigured status text.
+    private func backsSubtitle(for provider: LLMProvider) -> String {
+        "Backs \(MediaProviderCatalog.backedServiceIDs(for: provider).joined(separator: ", "))"
+    }
+
+    private func row(for provider: LLMProvider, subtitle: String? = nil) -> some View {
+        let subtitleText = subtitle ?? status(for: provider).label
+        return HStack(spacing: 8) {
             Circle()
                 .fill(status(for: provider).tint)
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 1) {
                 Text(provider.label)
-                Text(status(for: provider).label)
+                Text(subtitleText)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(provider.label), \(status(for: provider).label)")
+        .accessibilityLabel("\(provider.label), \(subtitleText)")
     }
 
     private enum KeyStatus {

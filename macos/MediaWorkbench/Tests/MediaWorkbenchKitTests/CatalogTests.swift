@@ -11,8 +11,11 @@ final class CatalogTests: XCTestCase {
         "qwen_image", "qwen_tts", "suno", "veo", "wan_video", "zai"
     ]
 
-    /// Expected tobor-kit `LLMModality` per provider (PR #52's modality
-    /// axis, replacing the app's local `MediaModality` wrapper).
+    /// Expected tobor-kit `LLMModality` per producer (PR #52's modality
+    /// axis, replacing the app's local `MediaModality` wrapper). `dashscope`
+    /// is a shared credential, not a producer — it declares all three
+    /// modalities it backs, so it is checked separately below rather than
+    /// forced into this one-modality-per-id table.
     private let expectedModalities: [String: LLMModality] = [
         "anthropic": .text,
         "gemini_chat": .text,
@@ -26,7 +29,6 @@ final class CatalogTests: XCTestCase {
         "suno": .audio,
         "openai_tts": .speech,
         "qwen_tts": .speech,
-        "dashscope": .speech,
         "grok_video": .video,
         "veo": .video,
         "wan_video": .video
@@ -44,19 +46,47 @@ final class CatalogTests: XCTestCase {
         )
     }
 
-    func testEveryProviderIsReachableFromExactlyOneModalitySection() {
-        let grouped = LLMModality.allCases.flatMap { MediaProviderCatalog.providers(in: $0) }
-        XCTAssertEqual(Set(grouped.map(\.id)), expectedIDs)
-        XCTAssertEqual(grouped.count, 16, "a provider appears in more than one modality section")
+    /// Producers (single declared modality) must each be reachable from
+    /// exactly one modality section — the Keys sidebar's per-modality
+    /// sections and the "each provider = one product" mental model both
+    /// depend on this. Shared credentials are explicitly out of scope: they
+    /// are allowed, by design, to declare more than one modality, and are
+    /// checked separately (`testSharedCredentialsDeclareEveryModalityTheyBack`).
+    func testEveryProducerIsReachableFromExactlyOneModalitySection() {
+        let producers = MediaProviderCatalog.producerProviders
+        let grouped = LLMModality.allCases.flatMap { LLMProvider.providers(in: producers, matching: $0) }
+        let expectedProducerIDs = expectedIDs.subtracting(["dashscope"])
+        XCTAssertEqual(Set(grouped.map(\.id)), expectedProducerIDs)
+        XCTAssertEqual(grouped.count, expectedProducerIDs.count, "a producer appears in more than one modality section")
     }
 
-    /// Every entry declares a modality via the kit's `LLMModality` axis, and
-    /// it matches the mapping this catalog chose.
+    /// Every producer declares a modality via the kit's `LLMModality` axis,
+    /// and it matches the mapping this catalog chose.
     func testModalitiesMatchExpectedMapping() {
         for (id, modality) in expectedModalities {
             let provider = MediaProviderCatalog.provider(id: id)
             XCTAssertEqual(provider?.effectiveModalities, [modality], "modality drift for \(id)")
         }
+    }
+
+    /// `dashscope` is not a dispatchable `--service` (no get_provider /
+    /// get_chat_provider arm in src/providers/mod.rs) — it's the shared
+    /// DashScope-family credential backing qwen-image, qwen-tts, and
+    /// wan-video, so it honestly declares all three modalities instead of
+    /// picking one as a stand-in, and the sidebar routes it to a distinct
+    /// "Shared Credentials" section rather than three producer sections.
+    func testSharedCredentialsDeclareEveryModalityTheyBack() {
+        let shared = MediaProviderCatalog.sharedCredentialProviders
+        XCTAssertEqual(shared.map(\.id), ["dashscope"])
+        let dashscope = MediaProviderCatalog.provider(id: "dashscope")
+        XCTAssertEqual(
+            Set(dashscope?.effectiveModalities ?? []),
+            [.image, .speech, .video]
+        )
+        XCTAssertEqual(
+            MediaProviderCatalog.backedServiceIDs(for: dashscope!),
+            ["qwen-image", "qwen-tts", "wan-video"]
+        )
     }
 
     /// Env var names come from `src/providers/mod.rs::api_key_env`; drift here

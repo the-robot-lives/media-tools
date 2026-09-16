@@ -14,8 +14,13 @@ import ToborKitUI
 /// value stays nil rather than inventing one.
 ///
 /// Modality comes straight from tobor-kit's ``LLMModality`` axis (PR #52):
-/// each entry's `modalities:` says what it produces, and the Settings
-/// sidebar / kit picker section on that via `sectionBy: .modality`.
+/// each entry's `modalities:` says what it produces (or, for a shared
+/// credential like `dashscope`, every surface it backs), and the Settings
+/// sidebar / kit picker section on that via `sectionBy: .modality`. The kit's
+/// axis assumes one producer maps to one modality; `isSharedCredential` /
+/// `producerProviders` / `sharedCredentialProviders` below are media-tool's
+/// own layer on top for entries that don't fit that assumption — see
+/// `KeysSettingsView` for how the sidebar uses them.
 public enum MediaProviderCatalog {
 
     /// The kit-shaped catalog handed to `LLMInferenceSettingsView(catalog:)`.
@@ -25,6 +30,9 @@ public enum MediaProviderCatalog {
         LLMProvider.provider(id: id, in: providers)
     }
 
+    /// Every entry (producer or shared credential) that supports `modality`.
+    /// The Keys sidebar does not use this directly for sectioning — see
+    /// ``producerProviders`` — but it is the honest "what can do X" answer.
     public static func providers(in modality: LLMModality) -> [LLMProvider] {
         LLMProvider.providers(in: providers, matching: modality)
     }
@@ -110,24 +118,6 @@ public enum MediaProviderCatalog {
         ),
 
         // ── Audio & Voice ───────────────────────────────────────────
-        // Not a dispatchable --service on its own (no get_provider /
-        // get_chat_provider arm in src/providers/mod.rs) — it's the shared
-        // DashScope family credential (qwen-tts / qwen-image / wan-video /
-        // happyhorse all resolve DASHSCOPE_API_KEY through dashscope.rs), so
-        // it has no single generation modality to inherit. Filed under
-        // `.speech` (DashScope's TTS surface is its most direct analog and
-        // keeps this a single-section sidebar entry like every other
-        // provider) rather than fanned across every modality the family
-        // touches — a judgment call, flagged for review.
-        LLMProvider(
-            id: "dashscope", label: "DashScope (Alibaba)", group: .cloud,
-            apiShape: .openAI,
-            defaultBaseURL: URL(string: "https://dashscope-intl.aliyuncs.com/api/v1"),
-            baseURLPlaceholder: nil,
-            envVarName: "DASHSCOPE_API_KEY", requiresKey: true,
-            defaultModel: nil,
-            modalities: [.speech]
-        ),
         LLMProvider(
             id: "elevenlabs", label: "ElevenLabs", group: .cloud,
             apiShape: .openAI,
@@ -193,10 +183,65 @@ public enum MediaProviderCatalog {
             defaultModel: nil,
             modalities: [.video]
         ),
+
+        // ── Shared credentials ─────────────────────────────────────
+        // Not a dispatchable --service on its own — no get_provider /
+        // get_chat_provider arm in src/providers/mod.rs. It's the shared
+        // DashScope family credential: qwen-tts, qwen-image, wan-video (and
+        // its happyhorse alias) all resolve DASHSCOPE_API_KEY through
+        // dashscope::resolve_key(). Its modalities list every surface that
+        // key actually backs (image + speech + video) rather than picking
+        // one as a stand-in; ``LLMProvider/isSharedCredential`` below is
+        // what routes it to the Keys sidebar's "Shared Credentials" section
+        // instead of duplicating it across three producer sections.
+        LLMProvider(
+            id: "dashscope", label: "DashScope (Alibaba)", group: .cloud,
+            apiShape: .openAI,
+            defaultBaseURL: URL(string: "https://dashscope-intl.aliyuncs.com/api/v1"),
+            baseURLPlaceholder: nil,
+            envVarName: "DASHSCOPE_API_KEY", requiresKey: true,
+            defaultModel: nil,
+            modalities: [.image, .speech, .video]
+        ),
     ]
 }
 
 extension LLMProvider {
     /// The hyphenated service id media-tool's CLI expects.
     public var serviceID: String { id.replacingOccurrences(of: "_", with: "-") }
+
+    /// App-level grouping over the kit's one-producer-one-modality data:
+    /// tobor-kit's `LLMProvider` has no notion of "credential vs. producer"
+    /// (its modality axis only says what a provider generates), so this is
+    /// pure media-tool convention, not a kit invariant. A catalog entry that
+    /// declares more than one modality isn't itself dispatchable — it's a
+    /// credential shared by several single-modality producers (see
+    /// `dashscope` above) — and the Keys sidebar sections it separately
+    /// instead of fanning it across every modality section it touches.
+    public var isSharedCredential: Bool { (modalities?.count ?? 0) > 1 }
+}
+
+extension MediaProviderCatalog {
+    /// Producer entries only (single declared modality) — what the Keys
+    /// sidebar sections `by .modality`, excluding shared credentials.
+    public static var producerProviders: [LLMProvider] {
+        providers.filter { !$0.isSharedCredential }
+    }
+
+    /// Shared-credential entries (e.g. `dashscope`) — catalog rows that back
+    /// more than one producer rather than being one themselves.
+    public static var sharedCredentialProviders: [LLMProvider] {
+        providers.filter(\.isSharedCredential)
+    }
+
+    /// The producer service ids a shared credential backs, in catalog order
+    /// (e.g. "qwen-image, qwen-tts, wan-video" for `dashscope`) — derived
+    /// from matching `envVarName` rather than hand-maintained, so it can't
+    /// drift from the entries it actually describes.
+    public static func backedServiceIDs(for credential: LLMProvider) -> [String] {
+        guard let envVarName = credential.envVarName else { return [] }
+        return producerProviders
+            .filter { $0.envVarName == envVarName }
+            .map(\.serviceID)
+    }
 }
