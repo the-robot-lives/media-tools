@@ -5,7 +5,7 @@ use std::time::Duration;
 use serde_json::json;
 
 use crate::prep::PromptPrepper;
-use crate::ui;
+use crate::telemetry as tel;
 
 const MAX_FIX_ATTEMPTS: usize = 2;
 
@@ -36,12 +36,12 @@ pub async fn validate_svg(path: &Path, verbose: bool, prep_llm: Option<&PromptPr
     match run_xmllint(path) {
         Ok(()) => {
             if verbose {
-                ui::verbose(&format!("SVG valid: {}", path.display()));
+                tel::verbose(&format!("SVG valid: {}", path.display()));
             }
             return true;
         }
         Err(lint_err) => {
-            ui::warn_msg(&format!(
+            tel::warn_msg(&format!(
                 "SVG validation failed for {}: {}",
                 path.display(),
                 lint_err.message
@@ -52,7 +52,7 @@ pub async fn validate_svg(path: &Path, verbose: bool, prep_llm: Option<&PromptPr
             };
 
             for attempt in 0..MAX_FIX_ATTEMPTS {
-                ui::step(&format!(
+                tel::step(&format!(
                     "Attempting LLM SVG fix (attempt {}/{})",
                     attempt + 1,
                     MAX_FIX_ATTEMPTS
@@ -69,7 +69,7 @@ pub async fn validate_svg(path: &Path, verbose: bool, prep_llm: Option<&PromptPr
                     match run_xmllint(path) {
                         Ok(()) => {
                             if verbose {
-                                ui::verbose(&format!(
+                                tel::verbose(&format!(
                                     "SVG fixed after {} attempt(s): {}",
                                     attempt,
                                     path.display()
@@ -84,12 +84,12 @@ pub async fn validate_svg(path: &Path, verbose: bool, prep_llm: Option<&PromptPr
                 match request_svg_fix(prepper, &svg_content, &current_err, verbose).await {
                     Some(fixed) => {
                         if let Err(e) = std::fs::write(path, &fixed) {
-                            ui::warn_msg(&format!("Failed to write fixed SVG: {}", e));
+                            tel::warn_msg(&format!("Failed to write fixed SVG: {}", e));
                             return false;
                         }
                     }
                     None => {
-                        ui::warn_msg("LLM SVG fix returned no result");
+                        tel::warn_msg("LLM SVG fix returned no result");
                         return false;
                     }
                 }
@@ -97,11 +97,11 @@ pub async fn validate_svg(path: &Path, verbose: bool, prep_llm: Option<&PromptPr
 
             match run_xmllint(path) {
                 Ok(()) => {
-                    ui::ok(&format!("SVG fixed by LLM: {}", path.display()));
+                    tel::ok(&format!("SVG fixed by LLM: {}", path.display()));
                     true
                 }
                 Err(e) => {
-                    ui::warn_msg(&format!(
+                    tel::warn_msg(&format!(
                         "SVG still invalid after {} fix attempts: {}",
                         MAX_FIX_ATTEMPTS, e.message
                     ));
@@ -160,7 +160,7 @@ Reply with ONLY the corrected SVG content. No markdown fences, no commentary, no
     let client = reqwest::Client::new();
 
     if verbose {
-        ui::verbose(&format!(
+        tel::verbose(&format!(
             "SVG fix POST {} ({} chars of SVG)",
             url,
             truncated.len()
@@ -179,7 +179,7 @@ Reply with ONLY the corrected SVG content. No markdown fences, no commentary, no
         Ok(r) => r,
         Err(e) => {
             if verbose {
-                ui::verbose(&format!("SVG fix request failed: {}", e));
+                tel::verbose(&format!("SVG fix request failed: {}", e));
             }
             return None;
         }
@@ -187,7 +187,7 @@ Reply with ONLY the corrected SVG content. No markdown fences, no commentary, no
 
     if !resp.status().is_success() {
         if verbose {
-            ui::verbose(&format!("SVG fix HTTP {}", resp.status()));
+            tel::verbose(&format!("SVG fix HTTP {}", resp.status()));
         }
         return None;
     }
@@ -196,7 +196,7 @@ Reply with ONLY the corrected SVG content. No markdown fences, no commentary, no
         Ok(v) => v,
         Err(e) => {
             if verbose {
-                ui::verbose(&format!("SVG fix response parse error: {}", e));
+                tel::verbose(&format!("SVG fix response parse error: {}", e));
             }
             return None;
         }
@@ -219,7 +219,7 @@ Reply with ONLY the corrected SVG content. No markdown fences, no commentary, no
         Some(cleaned)
     } else {
         if verbose {
-            ui::verbose("LLM response doesn't look like SVG — discarding");
+            tel::verbose("LLM response doesn't look like SVG — discarding");
         }
         None
     }

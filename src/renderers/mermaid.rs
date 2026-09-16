@@ -38,7 +38,7 @@ impl Renderer for MermaidRenderer {
             Ok(true)
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("mmdc failed: {}", stderr);
+            crate::telemetry::raw(&format!("mmdc failed: {}", stderr));
             Ok(false)
         }
     }

@@ -110,17 +110,17 @@ async fn fetch_url(url: &str) -> Option<ProviderConfig> {
             Ok(text) => match serde_yaml::from_str::<ProviderConfig>(&text) {
                 Ok(cfg) => Some(cfg),
                 Err(e) => {
-                    eprintln!("⚠ media-tool config: failed to parse remote config: {e}");
+                    crate::telemetry::raw(&format!("⚠ media-tool config: failed to parse remote config: {e}"));
                     None
                 }
             },
             Err(e) => {
-                eprintln!("⚠ media-tool config: remote fetch failed ({url}): {e}");
+                crate::telemetry::raw(&format!("⚠ media-tool config: remote fetch failed ({url}): {e}"));
                 None
             }
         },
         Err(e) => {
-            eprintln!("⚠ media-tool config: remote fetch failed ({url}): {e}");
+            crate::telemetry::raw(&format!("⚠ media-tool config: remote fetch failed ({url}): {e}"));
             None
         }
     }
@@ -131,12 +131,12 @@ fn read_file(path: &PathBuf) -> Option<ProviderConfig> {
         Ok(text) => match serde_yaml::from_str::<ProviderConfig>(&text) {
             Ok(cfg) => Some(cfg),
             Err(e) => {
-                eprintln!("⚠ media-tool config: invalid YAML at {}: {e}", path.display());
+                crate::telemetry::raw(&format!("⚠ media-tool config: invalid YAML at {}: {e}", path.display()));
                 None
             }
         },
         Err(e) => {
-            eprintln!("⚠ media-tool config: cannot read {}: {e}", path.display());
+            crate::telemetry::raw(&format!("⚠ media-tool config: cannot read {}: {e}", path.display()));
             None
         }
     }

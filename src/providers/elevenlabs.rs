@@ -5,7 +5,8 @@ use serde_json::json;
 
 use crate::attachments::LoadedAttachment;
 use crate::providers::{GenerationOptions, MediaProvider};
-use crate::ui;
+use crate::telemetry as tel;
+use crate::telemetry::progress;
 
 const DEFAULT_MODEL: &str = "eleven_multilingual_v2";
 const DEFAULT_VOICE_ID: &str = "21m00Tcm4TlvDq8ikWAM"; // Rachel
@@ -107,19 +108,20 @@ impl MediaProvider for ElevenLabsProvider {
         }
 
         if options.verbose {
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "POST {}/{}?output_format={}",
                 API_BASE, voice_id, output_format
             ));
             let preview: String = prompt_text.chars().take(120).collect();
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "Text: {}{}",
                 preview,
                 if prompt_text.len() > 120 { "..." } else { "" }
             ));
-            ui::verbose(&format!("Model: {}, voice_id: {}", model_id, voice_id));
+            tel::verbose(&format!("Model: {}, voice_id: {}", model_id, voice_id));
         }
 
+        progress::provider_request("elevenlabs", &options.model, &url, 1);
         let client = reqwest::Client::new();
         let resp = client
             .post(&url)
@@ -133,12 +135,14 @@ impl MediaProvider for ElevenLabsProvider {
         let response = match resp {
             Ok(r) => r,
             Err(e) => {
-                ui::fail_msg(&format!("Network error calling ElevenLabs: {}", e));
+                progress::provider_response("elevenlabs", 0, false, 1);
+                tel::fail_msg(&format!("Network error calling ElevenLabs: {}", e));
                 return Ok(false);
             }
         };
 
         let status = response.status();
+        progress::provider_response("elevenlabs", status.as_u16(), status.is_success(), 1);
         if status.as_u16() == 401 || status.as_u16() == 403 {
             let body_text = response.text().await.unwrap_or_default();
             color_eyre::eyre::bail!(
@@ -149,7 +153,7 @@ impl MediaProvider for ElevenLabsProvider {
         }
         if !status.is_success() {
             let body_text = response.text().await.unwrap_or_default();
-            ui::fail_msg(&format!(
+            tel::fail_msg(&format!(
                 "ElevenLabs error ({}): {}",
                 status.as_u16(),
                 &body_text[..body_text.len().min(300)]

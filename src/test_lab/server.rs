@@ -20,7 +20,7 @@ use crate::eval::Evaluator;
 use crate::pipeline::{self, PipelineConfig};
 use crate::prep::PromptPrepper;
 use crate::schema::parse_prompt_file;
-use crate::ui;
+use crate::telemetry as tel;
 
 use super::catalog::{
     load_detail, resolve_safe_media, scan_catalog, type_label, PromptDetail, TypeGroup,
@@ -75,7 +75,7 @@ struct Job {
 
 // ⟦𓈝𓀐𓐏𓊑⟧ run_lab :: auto-generated pointer for public function run_lab
 pub async fn run_lab(cfg: LabConfig) -> color_eyre::Result<()> {
-    ui::step(&format!(
+    tel::step(&format!(
         "Media-tool test lab — demos={} workspace={}",
         cfg.demos_dir.display(),
         cfg.workspace_dir.display()
@@ -83,7 +83,7 @@ pub async fn run_lab(cfg: LabConfig) -> color_eyre::Result<()> {
 
     let providers =
         registry::build_catalog(&cfg.demos_dir, &cfg.package_root);
-    ui::ok(&format!(
+    tel::ok(&format!(
         "Provider registry: {} total ({} implemented, {} stub, {} FIM channels, {} local tools)",
         providers.total,
         providers.implemented,
@@ -93,7 +93,7 @@ pub async fn run_lab(cfg: LabConfig) -> color_eyre::Result<()> {
     ));
 
     let settings = LabSettings::load(&cfg.workspace_dir);
-    ui::ok(&format!(
+    tel::ok(&format!(
         "Example-prompt LLM: {} / {} ({})",
         settings.llm.provider,
         settings.llm.effective_model(),
@@ -141,19 +141,19 @@ pub async fn run_lab(cfg: LabConfig) -> color_eyre::Result<()> {
     let addr = format!("127.0.0.1:{}", cfg.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     let url = format!("http://{addr}");
-    ui::ok(&format!("Test lab listening on {url}"));
-    eprintln!("  Graph lab: expand sections → pick a generator → scaffold / generate / view.");
-    eprintln!("  Demos:     {}", cfg.demos_dir.display());
-    eprintln!("  Workspace: {}", cfg.workspace_dir.display());
-    eprintln!(
+    tel::ok(&format!("Test lab listening on {url}"));
+    tel::raw("  Graph lab: expand sections → pick a generator → scaffold / generate / view.");
+    tel::raw(&format!("  Demos:     {}", cfg.demos_dir.display()));
+    tel::raw(&format!("  Workspace: {}", cfg.workspace_dir.display()));
+    tel::raw(&format!(
         "  Index:     {}",
         ExamplesIndex::path(&cfg.workspace_dir).display()
-    );
-    eprintln!(
+    ));
+    tel::raw(&format!(
         "  Settings:  {}",
         LabSettings::settings_path(&cfg.workspace_dir).display()
-    );
-    eprintln!("  Ctrl+C to stop.\n");
+    ));
+    tel::raw("  Ctrl+C to stop.\n");
 
     if cfg.open_browser {
         let _ = open_browser(&url);
@@ -1718,7 +1718,7 @@ async fn run_synthesize_prompts(
     });
 
     if st.inner.cfg.verbose {
-        ui::verbose(&format!("Example-prompt LLM POST {url} model={model}"));
+        tel::verbose(&format!("Example-prompt LLM POST {url} model={model}"));
     }
 
     let client = reqwest::Client::new();

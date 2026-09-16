@@ -7,7 +7,13 @@
 //!
 //! Terminal concerns (ratatui, crossterm, dialoguer, indicatif) are *not* used by the
 //! orchestration entry points in [`orchestrator`]; progress is surfaced through
-//! caller-supplied callbacks and returned values instead.
+//! caller-supplied callbacks, returned values and [`tracing`] events instead.
+//!
+//! Library code never prints. It publishes structured spans and events through
+//! [`telemetry`]; a front-end installs a `tracing` subscriber to observe a run. See the
+//! [`telemetry`] module docs for the event taxonomy — that taxonomy is the front-end API.
+//! The [`ui`] module is the *CLI's* terminal formatter: the binary's subscriber calls it, the
+//! library does not.
 
 pub mod attachments;
 pub mod dag;
@@ -23,6 +29,7 @@ pub mod refine;
 pub mod renderers;
 pub mod schema;
 pub mod structural;
+pub mod telemetry;
 pub mod test_lab;
 pub mod ui;
 pub mod validate;

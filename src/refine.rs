@@ -7,7 +7,8 @@ use crate::attachments::load_attachments;
 use crate::output::{genai_candidate_path, link_active};
 use crate::providers::{get_provider, GenerationOptions};
 use crate::schema::ParsedPrompt;
-use crate::ui;
+use crate::telemetry as tel;
+use crate::telemetry::progress;
 
 const REFINE_MODEL: &str = "gemini-3.7-flash";
 
@@ -25,14 +26,14 @@ pub async fn interactive_refine_loop(
         eprint!("\n  \x1b[1;33mSatisfied? (y/n/feedback): \x1b[0m");
         let mut input = String::new();
         if std::io::stdin().read_line(&mut input).is_err() {
-            ui::info("Refinement cancelled");
+            tel::info("Refinement cancelled");
             return;
         }
         let input = input.trim();
 
         if input.is_empty() || input.eq_ignore_ascii_case("y") || input.eq_ignore_ascii_case("yes")
         {
-            ui::ok("Accepted \u{2014} moving on");
+            tel::ok("Accepted \u{2014} moving on");
             return;
         }
 
@@ -47,11 +48,19 @@ pub async fn interactive_refine_loop(
             input.to_string()
         };
 
-        ui::step("Refining prompt via LLM");
+        progress::refine_started(&prompt.meta.id, 1, gen_model, "interactive feedback");
+        tel::step("Refining prompt via LLM");
         match refine_prompt_via_llm(&current_text, &feedback, api_key, verbose).await {
             Some(refined) => {
+                progress::refine_applied(
+                    &prompt.meta.id,
+                    1,
+                    gen_model,
+                    current_text.chars().count(),
+                    refined.chars().count(),
+                );
                 let preview: String = refined.chars().take(120).collect();
-                ui::info(&format!(
+                tel::info(&format!(
                     "Refined prompt: {}{}",
                     preview,
                     if refined.len() > 120 { "..." } else { "" }
@@ -62,7 +71,7 @@ pub async fn interactive_refine_loop(
                 prompt.payload.prompt.text = refined.clone();
                 current_text = refined;
 
-                ui::step("Regenerating with refined prompt");
+                tel::step("Regenerating with refined prompt");
                 let attachments = load_attachments(prompt).unwrap_or_default();
                 let options = GenerationOptions {
                     model: gen_model.to_string(),
@@ -89,11 +98,11 @@ pub async fn interactive_refine_loop(
                         {
                             Ok(true) => {
                                 if link_active(&candidate, output_path).is_ok() {
-                                    ui::ok(&format!("Regenerated: {}", output_path.display()));
+                                    tel::ok(&format!("Regenerated: {}", output_path.display()));
                                 }
                             }
                             _ => {
-                                ui::fail_msg(&format!(
+                                tel::fail_msg(&format!(
                                     "Regeneration failed: {}",
                                     output_path.display()
                                 ));
@@ -103,7 +112,7 @@ pub async fn interactive_refine_loop(
                 }
             }
             None => {
-                ui::warn_msg("Refinement failed \u{2014} keeping original prompt");
+                tel::warn_msg("Refinement failed \u{2014} keeping original prompt");
             }
         }
     }
@@ -143,7 +152,7 @@ async fn refine_prompt_via_llm(
     });
 
     if verbose {
-        ui::verbose(&format!(
+        tel::verbose(&format!(
             "Refine: POST {}?key=***",
             url.split('?').next().unwrap_or(&url)
         ));
@@ -160,7 +169,7 @@ async fn refine_prompt_via_llm(
         .ok()?;
 
     if !resp.status().is_success() {
-        ui::fail_msg(&format!("Refinement API returned {}", resp.status()));
+        tel::fail_msg(&format!("Refinement API returned {}", resp.status()));
         return None;
     }
 
@@ -220,9 +229,9 @@ fn update_prompt_file(path: &Path, old_text: &str, new_text: &str, feedback: &st
     };
 
     if let Err(e) = std::fs::write(path, final_content) {
-        ui::fail_msg(&format!("Failed to update prompt file: {}", e));
+        tel::fail_msg(&format!("Failed to update prompt file: {}", e));
     } else {
-        ui::ok(&format!("Updated {}", path.display()));
+        tel::ok(&format!("Updated {}", path.display()));
     }
 }
 

@@ -3,7 +3,7 @@ use std::time::Duration;
 use serde_json::json;
 
 use crate::schema::{AssetType, AudioKind, PromptSection};
-use crate::ui;
+use crate::telemetry as tel;
 
 const GROQ_API_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
 const DEFAULT_PREP_MODEL: &str = "openai/gpt-oss-120b";
@@ -295,7 +295,7 @@ impl PromptPrepper {
         {
             let api_key = std::env::var("MEDIA_PREP_API_KEY").unwrap_or_else(|_| "none".into());
             if verbose {
-                ui::verbose(&format!(
+                tel::verbose(&format!(
                     "Prompt prep via custom endpoint: {} (model: {})",
                     url, model
                 ));
@@ -311,7 +311,7 @@ impl PromptPrepper {
         if let Ok(key) = std::env::var("GROQ_API_KEY") {
             if !key.is_empty() {
                 if verbose {
-                    ui::verbose(&format!("Prompt prep via Groq (model: {})", model));
+                    tel::verbose(&format!("Prompt prep via Groq (model: {})", model));
                 }
                 return Some(PromptPrepper {
                     base_url: GROQ_API_URL
@@ -324,7 +324,7 @@ impl PromptPrepper {
         }
 
         if verbose {
-            ui::verbose(
+            tel::verbose(
                 "No prompt prep endpoint available (set GROQ_API_KEY or MEDIA_PREP_BASE_URL)",
             );
         }
@@ -345,7 +345,7 @@ impl PromptPrepper {
         let channel = prep_channel(asset_type, audio_kind, text_format, service);
         if !allows_llm_prep(channel) {
             if verbose {
-                ui::verbose(&format!(
+                tel::verbose(&format!(
                     "Prep skipped for {:?} channel — using verbatim text",
                     channel
                 ));
@@ -403,7 +403,7 @@ impl PromptPrepper {
         let client = reqwest::Client::new();
 
         if verbose {
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "Prompt prep POST {} (service={}, model={})",
                 url, service, self.model
             ));
@@ -421,7 +421,7 @@ impl PromptPrepper {
             Ok(r) => r,
             Err(e) => {
                 if verbose {
-                    ui::verbose(&format!("Prompt prep request failed: {}", e));
+                    tel::verbose(&format!("Prompt prep request failed: {}", e));
                 }
                 return None;
             }
@@ -431,7 +431,7 @@ impl PromptPrepper {
             let status = resp.status();
             let body_text = resp.text().await.unwrap_or_default();
             if verbose {
-                ui::verbose(&format!(
+                tel::verbose(&format!(
                     "Prompt prep HTTP {}: {}",
                     status,
                     &body_text[..body_text.len().min(200)]
@@ -444,7 +444,7 @@ impl PromptPrepper {
             Ok(v) => v,
             Err(e) => {
                 if verbose {
-                    ui::verbose(&format!("Prompt prep response parse error: {}", e));
+                    tel::verbose(&format!("Prompt prep response parse error: {}", e));
                 }
                 return None;
             }
@@ -457,7 +457,7 @@ impl PromptPrepper {
             .to_string();
 
         if verbose {
-            ui::verbose(&format!("Prompt prep raw: {}", &raw[..raw.len().min(300)]));
+            tel::verbose(&format!("Prompt prep raw: {}", &raw[..raw.len().min(300)]));
         }
 
         let cleaned = strip_reasoning_and_fences(&raw);
@@ -467,7 +467,7 @@ impl PromptPrepper {
                 let text = parsed["prompt"].as_str().unwrap_or("").trim().to_string();
                 if text.is_empty() {
                     if verbose {
-                        ui::verbose("Prompt prep returned empty prompt — falling back to raw");
+                        tel::verbose("Prompt prep returned empty prompt — falling back to raw");
                     }
                     return None;
                 }
@@ -480,7 +480,7 @@ impl PromptPrepper {
                 let text = if let Some(max) = limit {
                     if text.len() > max {
                         if verbose {
-                            ui::verbose(&format!(
+                            tel::verbose(&format!(
                                 "LLM output ({} chars) still exceeds limit ({}) — trimming at sentence boundary",
                                 text.len(), max
                             ));
@@ -497,7 +497,7 @@ impl PromptPrepper {
             }
             Err(e) => {
                 if verbose {
-                    ui::verbose(&format!(
+                    tel::verbose(&format!(
                         "Prompt prep JSON parse failed: {} — cleaned text: {}",
                         e,
                         &cleaned[..cleaned.len().min(200)]
@@ -528,7 +528,7 @@ impl PromptPrepper {
         let channel = prep_channel(asset_type, audio_kind, text_format, service);
         if !allows_llm_prep(channel) {
             if verbose {
-                ui::verbose(&format!(
+                tel::verbose(&format!(
                     "Refine skipped for {:?} channel — voice text stays verbatim",
                     channel
                 ));
@@ -581,7 +581,7 @@ impl PromptPrepper {
                             _ => "image/png",
                         };
                         if verbose {
-                            ui::verbose("Including failed output image in refinement request");
+                            tel::verbose("Including failed output image in refinement request");
                         }
                         json!([
                             {"type": "text", "text": instruction},
@@ -624,7 +624,7 @@ impl PromptPrepper {
         let client = reqwest::Client::new();
 
         if verbose {
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "Prompt refine POST {} (vision-informed refinement)",
                 url
             ));
@@ -642,7 +642,7 @@ impl PromptPrepper {
             Ok(r) => r,
             Err(e) => {
                 if verbose {
-                    ui::verbose(&format!("Prompt refine request failed: {}", e));
+                    tel::verbose(&format!("Prompt refine request failed: {}", e));
                 }
                 return None;
             }
@@ -650,7 +650,7 @@ impl PromptPrepper {
 
         if !resp.status().is_success() {
             if verbose {
-                ui::verbose(&format!("Prompt refine HTTP {}", resp.status()));
+                tel::verbose(&format!("Prompt refine HTTP {}", resp.status()));
             }
             return None;
         }
@@ -659,7 +659,7 @@ impl PromptPrepper {
             Ok(v) => v,
             Err(e) => {
                 if verbose {
-                    ui::verbose(&format!("Prompt refine response error: {}", e));
+                    tel::verbose(&format!("Prompt refine response error: {}", e));
                 }
                 return None;
             }
@@ -672,7 +672,7 @@ impl PromptPrepper {
             .to_string();
 
         if verbose {
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "Prompt refine raw: {}",
                 &raw[..raw.len().min(300)]
             ));
@@ -775,7 +775,7 @@ fn resolve_guidance(
     if let Some(content) = crate::fim::guidance_for(service, asset_type, text_format, fim_enabled) {
         if verbose {
             let label = text_format.unwrap_or(service);
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "FIM solution loaded for {service}/{label} ({} chars; replaces static guidance)",
                 content.len()
             ));
@@ -784,7 +784,7 @@ fn resolve_guidance(
     } else {
         if verbose && fim_enabled {
             let label = text_format.unwrap_or("");
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "No FIM solution for {service}/{asset_type:?}/{label} — using static guidance"
             ));
         }

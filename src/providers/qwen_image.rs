@@ -6,7 +6,8 @@ use serde_json::json;
 use crate::attachments::LoadedAttachment;
 use crate::providers::dashscope;
 use crate::providers::{GenerationOptions, MediaProvider};
-use crate::ui;
+use crate::telemetry as tel;
+use crate::telemetry::progress;
 
 const DEFAULT_MODEL: &str = "qwen-image-3.0";
 
@@ -66,10 +67,11 @@ impl MediaProvider for QwenImageProvider {
 
         let api_url = dashscope::multimodal_url(options);
         if options.verbose {
-            ui::verbose(&format!("POST {}", api_url));
-            ui::verbose(&format!("Model: {}", model));
+            tel::verbose(&format!("POST {}", api_url));
+            tel::verbose(&format!("Model: {}", model));
         }
 
+        progress::provider_request("qwen-image", &options.model, &api_url, 1);
         let client = reqwest::Client::new();
         let resp = client
             .post(&api_url)
@@ -83,12 +85,14 @@ impl MediaProvider for QwenImageProvider {
         let response = match resp {
             Ok(r) => r,
             Err(e) => {
-                ui::fail_msg(&format!("Network error calling Qwen Image: {}", e));
+                progress::provider_response("qwen-image", 0, false, 1);
+                tel::fail_msg(&format!("Network error calling Qwen Image: {}", e));
                 return Ok(false);
             }
         };
 
         let status = response.status();
+        progress::provider_response("qwen-image", status.as_u16(), status.is_success(), 1);
         if status.as_u16() == 401 || status.as_u16() == 403 {
             let body_text = response.text().await.unwrap_or_default();
             color_eyre::eyre::bail!(
@@ -99,7 +103,7 @@ impl MediaProvider for QwenImageProvider {
         }
         if !status.is_success() {
             let body_text = response.text().await.unwrap_or_default();
-            ui::fail_msg(&format!(
+            tel::fail_msg(&format!(
                 "Qwen Image error ({}): {}",
                 status.as_u16(),
                 &body_text[..body_text.len().min(300)]
@@ -148,13 +152,13 @@ pub(crate) async fn download_to(
     verbose: bool,
 ) -> color_eyre::Result<bool> {
     if verbose {
-        ui::verbose(&format!("Downloading {}", url));
+        tel::verbose(&format!("Downloading {}", url));
     }
     let audio_resp = client.get(url).timeout(Duration::from_secs(120)).send().await;
     match audio_resp {
         Ok(r) => {
             if !r.status().is_success() {
-                ui::fail_msg(&format!("Download failed: HTTP {}", r.status()));
+                tel::fail_msg(&format!("Download failed: HTTP {}", r.status()));
                 return Ok(false);
             }
             let bytes = r.bytes().await?;
@@ -165,7 +169,7 @@ pub(crate) async fn download_to(
             Ok(true)
         }
         Err(e) => {
-            ui::fail_msg(&format!("Download error: {}", e));
+            tel::fail_msg(&format!("Download error: {}", e));
             Ok(false)
         }
     }

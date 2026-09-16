@@ -1,3 +1,9 @@
+//! Terminal formatting for the CLI.
+//!
+//! Only the binary calls these: `src/term_layer.rs` renders `media_tool::telemetry` UI
+//! events through them, and `main.rs` uses them directly for CLI-only status lines.
+//! Library code emits telemetry events instead — see [`crate::telemetry`].
+
 const RED: &str = "\x1b[0;31m";
 const YEL: &str = "\x1b[1;33m";
 const GRN: &str = "\x1b[0;32m";
@@ -60,4 +66,15 @@ pub fn plan_item(id: &str, asset_type: &str, service: &str) {
 // ⟦𓁿𓂑𓐨𓄟⟧ plan_detail :: auto-generated pointer for public function plan_detail
 pub fn plan_detail(label: &str, value: &str) {
     eprintln!("    {:<7}: {}", label, value);
+}
+
+/// An empty stderr line (spacing) — the old bare `eprintln!()` calls.
+pub fn blank() {
+    eprintln!();
+}
+
+/// A pre-formatted stderr line, printed verbatim — for output that never went through one of
+/// the styled helpers above.
+pub fn raw(msg: &str) {
+    eprintln!("{msg}");
 }

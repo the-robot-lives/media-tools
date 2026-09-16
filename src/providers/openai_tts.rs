@@ -5,7 +5,8 @@ use serde_json::json;
 
 use crate::attachments::LoadedAttachment;
 use crate::providers::{GenerationOptions, MediaProvider};
-use crate::ui;
+use crate::telemetry as tel;
+use crate::telemetry::progress;
 
 const DEFAULT_MODEL: &str = "gpt-4o-mini-tts";
 const DEFAULT_VOICE: &str = "alloy";
@@ -73,19 +74,20 @@ impl MediaProvider for OpenAiTtsProvider {
         }
 
         if options.verbose {
-            ui::verbose(&format!("POST {}", API_URL));
+            tel::verbose(&format!("POST {}", API_URL));
             let preview: String = prompt_text.chars().take(120).collect();
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "Input: {}{}",
                 preview,
                 if prompt_text.len() > 120 { "..." } else { "" }
             ));
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "Model: {}, voice: {}, format: {}",
                 model, voice, response_format
             ));
         }
 
+        progress::provider_request("openai-tts", &options.model, API_URL, 1);
         let client = reqwest::Client::new();
         let resp = client
             .post(API_URL)
@@ -99,12 +101,14 @@ impl MediaProvider for OpenAiTtsProvider {
         let response = match resp {
             Ok(r) => r,
             Err(e) => {
-                ui::fail_msg(&format!("Network error calling OpenAI TTS: {}", e));
+                progress::provider_response("openai-tts", 0, false, 1);
+                tel::fail_msg(&format!("Network error calling OpenAI TTS: {}", e));
                 return Ok(false);
             }
         };
 
         let status = response.status();
+        progress::provider_response("openai-tts", status.as_u16(), status.is_success(), 1);
         if status.as_u16() == 401 || status.as_u16() == 403 {
             let body_text = response.text().await.unwrap_or_default();
             color_eyre::eyre::bail!(
@@ -115,7 +119,7 @@ impl MediaProvider for OpenAiTtsProvider {
         }
         if !status.is_success() {
             let body_text = response.text().await.unwrap_or_default();
-            ui::fail_msg(&format!(
+            tel::fail_msg(&format!(
                 "OpenAI TTS error ({}): {}",
                 status.as_u16(),
                 &body_text[..body_text.len().min(300)]

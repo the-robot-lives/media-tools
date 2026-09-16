@@ -8,7 +8,8 @@ use serde_json::json;
 use crate::attachments::resolve_mime_type;
 use crate::schema::{EvalCriterion, EvalSection};
 use crate::structural::{self, is_structural_candidate, score_structural};
-use crate::ui;
+use crate::telemetry as tel;
+use crate::telemetry::progress;
 
 // ---------------------------------------------------------------------------
 // Groq last-resort variant selection (kept as fallback)
@@ -31,7 +32,7 @@ pub async fn evaluate_candidates(
     }
 
     if api_key.is_empty() {
-        ui::warn_msg("No GROQ_API_KEY \u{2014} selecting first candidate");
+        tel::warn_msg("No GROQ_API_KEY \u{2014} selecting first candidate");
         return 0;
     }
 
@@ -67,7 +68,7 @@ pub async fn evaluate_candidates(
         let data = match std::fs::read(cpath) {
             Ok(d) => d,
             Err(e) => {
-                ui::warn_msg(&format!("Cannot read candidate {}: {}", cpath.display(), e));
+                tel::warn_msg(&format!("Cannot read candidate {}: {}", cpath.display(), e));
                 continue;
             }
         };
@@ -91,7 +92,7 @@ pub async fn evaluate_candidates(
     });
 
     if verbose {
-        ui::verbose(&format!(
+        tel::verbose(&format!(
             "Groq vision eval: {} candidates via {}",
             candidate_paths.len(),
             model
@@ -115,7 +116,7 @@ pub async fn evaluate_candidates(
                     let text = strip_think(text);
                     let text = text.trim();
                     if verbose {
-                        ui::verbose(&format!("Groq response: {:?}", text));
+                        tel::verbose(&format!("Groq response: {:?}", text));
                     }
                     if let Ok(num) = text
                         .chars()
@@ -128,7 +129,7 @@ pub async fn evaluate_candidates(
                             return idx;
                         }
                     }
-                    ui::warn_msg(&format!(
+                    tel::warn_msg(&format!(
                         "Could not parse Groq selection ({:?}) \u{2014} defaulting to first",
                         text
                     ));
@@ -137,14 +138,14 @@ pub async fn evaluate_candidates(
             0
         }
         Ok(resp) => {
-            ui::warn_msg(&format!(
+            tel::warn_msg(&format!(
                 "Groq vision eval failed (HTTP {}) \u{2014} selecting first candidate",
                 resp.status()
             ));
             0
         }
         Err(e) => {
-            ui::warn_msg(&format!(
+            tel::warn_msg(&format!(
                 "Groq vision eval failed: {} \u{2014} selecting first candidate",
                 e
             ));
@@ -248,7 +249,7 @@ impl Evaluator {
             let effective_key = override_key.as_deref().unwrap_or(&api_key);
             let models_url = format!("{}/models", base);
             if verbose {
-                ui::verbose(&format!("Probing eval endpoint: {}", base));
+                tel::verbose(&format!("Probing eval endpoint: {}", base));
             }
             match client
                 .get(&models_url)
@@ -271,7 +272,7 @@ impl Evaluator {
                     };
 
                     if verbose {
-                        ui::verbose(&format!(
+                        tel::verbose(&format!(
                             "Eval endpoint reachable: {} (model: {})",
                             base, model_id
                         ));
@@ -285,19 +286,19 @@ impl Evaluator {
                 }
                 Ok(resp) => {
                     if verbose {
-                        ui::verbose(&format!("Eval probe {} returned {}", base, resp.status()));
+                        tel::verbose(&format!("Eval probe {} returned {}", base, resp.status()));
                     }
                 }
                 Err(e) => {
                     if verbose {
-                        ui::verbose(&format!("Eval probe {} unreachable: {}", base, e));
+                        tel::verbose(&format!("Eval probe {} unreachable: {}", base, e));
                     }
                 }
             }
         }
 
         if verbose {
-            ui::verbose("No eval endpoint reachable — grading disabled");
+            tel::verbose("No eval endpoint reachable — grading disabled");
         }
         None
     }
@@ -324,8 +325,48 @@ impl Evaluator {
     }
 
     /// Like [`score_output`] but passes expected duration for structural checks.
+    ///
+    /// Emits `eval.started` / `eval.completed` on the telemetry progress channel around the
+    /// scoring itself, which lives in [`Self::score_output_inner`].
     // ⟦𓐮𓇥𓈥𓌕⟧ score_output_with_duration :: Like [`score_output`] but passes expected duration for structural checks.
     pub async fn score_output_with_duration(
+        &self,
+        path: &Path,
+        prompt_text: &str,
+        eval: &EvalSection,
+        expected_duration: Option<f64>,
+        verbose: bool,
+    ) -> Option<EvalScore> {
+        let output_display = path.display().to_string();
+        progress::eval_started(
+            &output_display,
+            effective_mode_for_path(eval, path),
+            &self.model,
+        );
+        let score = self
+            .score_output_inner(path, prompt_text, eval, expected_duration, verbose)
+            .await;
+        let threshold = eval.effective_pass_threshold();
+        match &score {
+            Some(s) => progress::eval_completed(
+                &output_display,
+                s.weighted,
+                threshold,
+                s.passes(eval),
+                s.reject_hits.len(),
+            ),
+            None => progress::eval_completed(
+                &output_display,
+                progress::NO_SCORE,
+                threshold,
+                false,
+                0,
+            ),
+        }
+        score
+    }
+
+    async fn score_output_inner(
         &self,
         path: &Path,
         prompt_text: &str,
@@ -391,7 +432,7 @@ impl Evaluator {
                 Some(frames) => frames,
                 None => {
                     if verbose {
-                        ui::verbose(&format!(
+                        tel::verbose(&format!(
                             "Video {} LLM frames failed — using structural if available",
                             path.display()
                         ));
@@ -402,7 +443,7 @@ impl Evaluator {
             "mp3" | "wav" | "ogg" | "flac" | "m4a" => {
                 // No audio-capable LLM wired — structural only
                 if verbose {
-                    ui::verbose(&format!(
+                    tel::verbose(&format!(
                         "Audio {} — using structural scoring (no audio LLM)",
                         path.display()
                     ));
@@ -411,7 +452,7 @@ impl Evaluator {
             }
             _ => {
                 if verbose {
-                    ui::verbose(&format!(
+                    tel::verbose(&format!(
                         "Unknown extension '{}' for {} — un-scorable",
                         ext,
                         path.display()
@@ -502,7 +543,7 @@ impl Evaluator {
         let url = format!("{}/chat/completions", self.base_url);
 
         if verbose {
-            ui::verbose(&format!("Eval POST {}", url));
+            tel::verbose(&format!("Eval POST {}", url));
         }
 
         for attempt in 0..2 {
@@ -518,7 +559,7 @@ impl Evaluator {
                 Ok(r) => r,
                 Err(e) => {
                     if verbose {
-                        ui::verbose(&format!("Eval request failed: {}", e));
+                        tel::verbose(&format!("Eval request failed: {}", e));
                     }
                     return None;
                 }
@@ -526,7 +567,7 @@ impl Evaluator {
 
             if !resp.status().is_success() {
                 if verbose {
-                    ui::verbose(&format!("Eval returned HTTP {}", resp.status()));
+                    tel::verbose(&format!("Eval returned HTTP {}", resp.status()));
                 }
                 return None;
             }
@@ -535,7 +576,7 @@ impl Evaluator {
                 Ok(v) => v,
                 Err(e) => {
                     if verbose {
-                        ui::verbose(&format!("Eval response JSON error: {}", e));
+                        tel::verbose(&format!("Eval response JSON error: {}", e));
                     }
                     return None;
                 }
@@ -548,7 +589,7 @@ impl Evaluator {
                 .to_string();
 
             if verbose {
-                ui::verbose(&format!(
+                tel::verbose(&format!(
                     "Eval raw response: {}",
                     &raw[..raw.len().min(400)]
                 ));
@@ -564,7 +605,7 @@ impl Evaluator {
                 Err(e) => {
                     if attempt == 0 {
                         if verbose {
-                            ui::verbose(&format!(
+                            tel::verbose(&format!(
                                 "Eval JSON parse failed (attempt {}): {} — retrying",
                                 attempt + 1,
                                 e
@@ -573,7 +614,7 @@ impl Evaluator {
                         continue;
                     }
                     if verbose {
-                        ui::verbose(&format!("Eval JSON parse failed after retry: {}", e));
+                        tel::verbose(&format!("Eval JSON parse failed after retry: {}", e));
                     }
                     return None;
                 }
@@ -650,7 +691,7 @@ async fn try_html_screenshot_parts(path: &Path, verbose: bool) -> Option<Vec<ser
     let renderer = renderers::get_renderer("puppeteer")?;
     if !renderer.is_available() {
         if verbose {
-            ui::verbose("eval.visual: puppeteer not available — text fallback");
+            tel::verbose("eval.visual: puppeteer not available — text fallback");
         }
         return None;
     }
@@ -677,7 +718,7 @@ async fn try_html_screenshot_parts(path: &Path, verbose: bool) -> Option<Vec<ser
         }
         _ => {
             if verbose {
-                ui::verbose("eval.visual: puppeteer screenshot failed");
+                tel::verbose("eval.visual: puppeteer screenshot failed");
             }
             let _ = std::fs::remove_file(&tmp);
             None
@@ -711,7 +752,7 @@ async fn try_svg_raster_parts(path: &Path, verbose: bool) -> Option<Vec<serde_js
     };
     if !ok {
         if verbose {
-            ui::verbose("eval.visual: SVG rasterize failed (rsvg-convert/convert)");
+            tel::verbose("eval.visual: SVG rasterize failed (rsvg-convert/convert)");
         }
         let _ = std::fs::remove_file(&tmp);
         return None;
@@ -746,7 +787,7 @@ fn pick_model(models_json: &serde_json::Value, verbose: bool) -> String {
 
     if non_embedding.is_empty() {
         if verbose {
-            ui::verbose("No non-embedding models found, using 'qwen3.6'");
+            tel::verbose("No non-embedding models found, using 'qwen3.6'");
         }
         return "qwen3.6".into();
     }
@@ -860,6 +901,7 @@ fn build_score(parsed: &serde_json::Value, eval: &EvalSection, verbose: bool) ->
     let mut weight_total = 0.0f64;
     let mut per_criterion: HashMap<String, f64> = HashMap::new();
 
+    let threshold = eval.effective_pass_threshold();
     for (name, criterion) in &eval.criteria {
         let raw_score = scores_map.get(name).and_then(|v| v.as_f64()).unwrap_or(0.0);
         // Normalize 0-10 → 0-1
@@ -867,6 +909,13 @@ fn build_score(parsed: &serde_json::Value, eval: &EvalSection, verbose: bool) ->
         let weight = criterion.weight.unwrap_or(1.0);
         weighted_sum += weight * normalized;
         weight_total += weight;
+        crate::telemetry::progress::eval_criterion(
+            name,
+            weight,
+            normalized,
+            threshold,
+            normalized >= threshold,
+        );
         per_criterion.insert(name.clone(), normalized);
     }
 
@@ -890,7 +939,7 @@ fn build_score(parsed: &serde_json::Value, eval: &EvalSection, verbose: bool) ->
     let notes = parsed["notes"].as_str().unwrap_or("").to_string();
 
     if verbose {
-        ui::verbose(&format!(
+        tel::verbose(&format!(
             "Eval score: weighted={:.3}, reject_hits={:?}, notes={}",
             weighted,
             reject_hits,
@@ -916,7 +965,7 @@ async fn extract_video_frames(path: &Path, verbose: bool) -> Option<Vec<serde_js
         .await;
     if ffprobe_check.is_err() {
         if verbose {
-            ui::verbose("ffprobe not found — video eval skipped");
+            tel::verbose("ffprobe not found — video eval skipped");
         }
         return None;
     }
@@ -993,7 +1042,7 @@ async fn extract_video_frames(path: &Path, verbose: bool) -> Option<Vec<serde_js
                     }));
                 }
             } else if verbose {
-                ui::verbose(&format!("ffmpeg frame extract failed at {:.1}s", t));
+                tel::verbose(&format!("ffmpeg frame extract failed at {:.1}s", t));
             }
         }
     }
