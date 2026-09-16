@@ -50,7 +50,7 @@ public struct KeysSettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.red)
             }
-            ForEach(MediaModality.allCases, id: \.self) { modality in
+            ForEach(LLMProvider.modalities(in: MediaProviderCatalog.all), id: \.self) { modality in
                 Section(modality.label) {
                     ForEach(MediaProviderCatalog.providers(in: modality)) { provider in
                         row(for: provider).tag(provider.id)
@@ -61,7 +61,7 @@ public struct KeysSettingsView: View {
         .listStyle(.sidebar)
     }
 
-    private func row(for provider: MediaProvider) -> some View {
+    private func row(for provider: LLMProvider) -> some View {
         HStack(spacing: 8) {
             Circle()
                 .fill(status(for: provider).tint)
@@ -102,7 +102,7 @@ public struct KeysSettingsView: View {
         }
     }
 
-    private func status(for provider: MediaProvider) -> KeyStatus {
+    private func status(for provider: LLMProvider) -> KeyStatus {
         guard let spec = entries[provider.id]?.apiKey else { return .unconfigured }
         switch spec {
         case .literal:
@@ -131,7 +131,8 @@ public struct KeysSettingsView: View {
                     LLMInferenceSettingsView(
                         config: $draft,
                         catalog: MediaProviderCatalog.all,
-                        environment: processEnvironment
+                        environment: processEnvironment,
+                        sectionBy: .modality
                     )
                 }
                 .padding(20)
@@ -170,7 +171,7 @@ public struct KeysSettingsView: View {
         // Default a brand-new provider to `.environment`, never `.literal`:
         // no key at rest in a plaintext YAML file we do not control the
         // permissions of.
-        let entry = entries[id] ?? ProviderKeyEntry.defaultEntry(for: provider.entry)
+        let entry = entries[id] ?? ProviderKeyEntry.defaultEntry(for: provider)
         draft = entry.inferenceConfig(providerID: id)
     }
 

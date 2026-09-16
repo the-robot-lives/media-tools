@@ -57,10 +57,10 @@ final class ProviderConfigStoreTests: XCTestCase {
     /// an env var, and never produces a literal key at rest.
     func testDefaultEntryUsesEnvironmentNotLiteral() throws {
         for provider in MediaProviderCatalog.providers {
-            let entry = ProviderKeyEntry.defaultEntry(for: provider.entry)
+            let entry = ProviderKeyEntry.defaultEntry(for: provider)
             switch entry.apiKey {
             case .environment(let name):
-                XCTAssertEqual(name, provider.entry.envVarName)
+                XCTAssertEqual(name, provider.envVarName)
             case .literal:
                 XCTFail("\(provider.id) defaulted to a literal key")
             case nil:
@@ -71,7 +71,7 @@ final class ProviderConfigStoreTests: XCTestCase {
 
     func testDefaultEntryCarriesNoBaseURLModelOrShapeOverride() {
         let entry = ProviderKeyEntry.defaultEntry(
-            for: XCTUnwrapOrFail(MediaProviderCatalog.provider(id: "suno")?.entry)
+            for: XCTUnwrapOrFail(MediaProviderCatalog.provider(id: "suno"))
         )
         XCTAssertNil(entry.baseURL)
         XCTAssertNil(entry.model)

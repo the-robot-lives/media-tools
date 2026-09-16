@@ -11,6 +11,27 @@ final class CatalogTests: XCTestCase {
         "qwen_image", "qwen_tts", "suno", "veo", "wan_video", "zai"
     ]
 
+    /// Expected tobor-kit `LLMModality` per provider (PR #52's modality
+    /// axis, replacing the app's local `MediaModality` wrapper).
+    private let expectedModalities: [String: LLMModality] = [
+        "anthropic": .text,
+        "gemini_chat": .text,
+        "groq_chat": .text,
+        "openai_chat": .text,
+        "openrouter": .text,
+        "zai": .text,
+        "gemini": .image,
+        "qwen_image": .image,
+        "elevenlabs": .audio,
+        "suno": .audio,
+        "openai_tts": .speech,
+        "qwen_tts": .speech,
+        "dashscope": .speech,
+        "grok_video": .video,
+        "veo": .video,
+        "wan_video": .video
+    ]
+
     func testCatalogCoversExactlyTheSixteenProviders() {
         XCTAssertEqual(MediaProviderCatalog.providers.count, 16)
         XCTAssertEqual(Set(MediaProviderCatalog.providers.map(\.id)), expectedIDs)
@@ -24,9 +45,18 @@ final class CatalogTests: XCTestCase {
     }
 
     func testEveryProviderIsReachableFromExactlyOneModalitySection() {
-        let grouped = MediaModality.allCases.flatMap { MediaProviderCatalog.providers(in: $0) }
+        let grouped = LLMModality.allCases.flatMap { MediaProviderCatalog.providers(in: $0) }
         XCTAssertEqual(Set(grouped.map(\.id)), expectedIDs)
         XCTAssertEqual(grouped.count, 16, "a provider appears in more than one modality section")
+    }
+
+    /// Every entry declares a modality via the kit's `LLMModality` axis, and
+    /// it matches the mapping this catalog chose.
+    func testModalitiesMatchExpectedMapping() {
+        for (id, modality) in expectedModalities {
+            let provider = MediaProviderCatalog.provider(id: id)
+            XCTAssertEqual(provider?.effectiveModalities, [modality], "modality drift for \(id)")
+        }
     }
 
     /// Env var names come from `src/providers/mod.rs::api_key_env`; drift here
@@ -52,7 +82,7 @@ final class CatalogTests: XCTestCase {
         ]
         for (id, envVar) in expected {
             XCTAssertEqual(
-                MediaProviderCatalog.provider(id: id)?.entry.envVarName, envVar,
+                MediaProviderCatalog.provider(id: id)?.envVarName, envVar,
                 "env var drift for \(id)"
             )
         }
