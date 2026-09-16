@@ -239,21 +239,34 @@ pub fn candidates_for(
         },
 
         // Chat / code generation types — use a Groq model id that is currently listed.
+        // Unknown (unrecognised `type:`) is a generic text asset, so it rides the
+        // same ladder instead of falling through to an image model.
         AssetType::Component
         | AssetType::ReactPage
         | AssetType::Html
         | AssetType::StyleGuide
         | AssetType::Diagram
-        | AssetType::Document => match quality {
-            Quality::Low | Quality::Medium | Quality::High => vec![Candidate {
-                service: "groq-chat",
-                model: DEFAULT_CHAT_MODEL,
-            }],
-        },
+        | AssetType::Document
+        | AssetType::Unknown => chat_candidates(quality),
+    }
+}
 
-        AssetType::Unknown => vec![Candidate {
-            service: "gemini",
-            model: "gemini-3.1-flash-image",
+/// Chat ladder for a quality tier. YAML override (media-tool.yaml chat_tiers)
+/// wins over the built-in ladder.
+fn chat_candidates(quality: Quality) -> Vec<Candidate> {
+    chat_candidates_with(crate::provider_config::loaded(), quality)
+}
+
+fn chat_candidates_with(
+    cfg: Option<&crate::provider_config::ProviderConfig>,
+    quality: Quality,
+) -> Vec<Candidate> {
+    let key = crate::provider_config::tier_key(quality);
+    match cfg.and_then(|c| c.chat_tiers.get(key)) {
+        Some(entries) => crate::provider_config::parse_candidates(entries),
+        None => vec![Candidate {
+            service: "groq-chat",
+            model: DEFAULT_CHAT_MODEL,
         }],
     }
 }
@@ -533,5 +546,66 @@ mod tests {
             let c = candidates_for(at, AudioKind::Voice, Quality::High);
             assert_eq!(c[0].service, "groq-chat");
         }
+    }
+
+    #[test]
+    fn unknown_type_routes_to_chat_not_image() {
+        let (at, kind) = AssetType::from_type_str("gcode");
+        assert_eq!(at, AssetType::Unknown);
+        assert!(at.is_chat_type());
+        for q in [Quality::Low, Quality::Medium, Quality::High] {
+            let c = candidates_for(at, kind, q);
+            assert_eq!(c[0].service, "groq-chat");
+            assert_eq!(c[0].model, DEFAULT_CHAT_MODEL);
+            assert!(
+                c.iter().all(|c| get_chat_provider(c.service).is_some()),
+                "unknown type must not dispatch to a media provider: {c:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn chat_tiers_absent_config_keeps_compiled_default() {
+        for q in [Quality::Low, Quality::Medium, Quality::High] {
+            let c = chat_candidates_with(None, q);
+            assert_eq!(c.len(), 1);
+            assert_eq!(c[0].service, "groq-chat");
+            assert_eq!(c[0].model, DEFAULT_CHAT_MODEL);
+        }
+    }
+
+    #[test]
+    fn chat_tiers_config_overrides_compiled_default() {
+        let cfg: crate::provider_config::ProviderConfig = serde_yaml::from_str(
+            r#"
+chat_tiers:
+  high:
+    - anthropic:claude-opus-4
+    - groq-chat:openai/gpt-oss-120b
+"#,
+        )
+        .unwrap();
+        let high = chat_candidates_with(Some(&cfg), Quality::High);
+        assert_eq!(high.len(), 2);
+        assert_eq!(high[0].service, "anthropic");
+        assert_eq!(high[0].model, "claude-opus-4");
+        assert_eq!(high[1].service, "groq-chat");
+        // Tiers without an override keep the compiled default.
+        let low = chat_candidates_with(Some(&cfg), Quality::Low);
+        assert_eq!(low[0].service, "groq-chat");
+        assert_eq!(low[0].model, DEFAULT_CHAT_MODEL);
+    }
+
+    #[test]
+    fn image_tier_unaffected_by_chat_changes() {
+        let (at, kind) = AssetType::from_type_str("image");
+        assert_eq!(at, AssetType::Image);
+        assert!(!at.is_chat_type());
+        let low = candidates_for(at, kind, Quality::Low);
+        assert_eq!(low[0].service, "gemini");
+        assert_eq!(low[0].model, "gemini-3.1-flash-lite-image");
+        let high = candidates_for(at, kind, Quality::High);
+        assert_eq!(high[0].model, "gemini-3-pro-image");
+        assert!(high.iter().all(|c| get_chat_provider(c.service).is_none()));
     }
 }

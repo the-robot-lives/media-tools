@@ -34,6 +34,11 @@ pub struct ProviderConfig {
     /// for that tier when present.
     #[serde(default)]
     pub image_tiers: BTreeMap<String, Vec<String>>,
+    /// Chat/text tier ladders, same shape as `image_tiers`. Each entry is
+    /// "service:model" (e.g. "groq-chat:openai/gpt-oss-120b"). Replaces the
+    /// built-in chat ladder for that tier when present.
+    #[serde(default)]
+    pub chat_tiers: BTreeMap<String, Vec<String>>,
     /// Max prompt chars per service (overrides `providers::constraints`).
     #[serde(default)]
     pub max_prompt_chars: BTreeMap<String, usize>,
@@ -198,6 +203,9 @@ image_tiers:
   high:
     - gemini:gemini-3-pro-image
     - gemini:gemini-3.1-flash-image
+chat_tiers:
+  high:
+    - groq-chat:openai/gpt-oss-120b
 max_prompt_chars:
   gemini: 4000
 prompt_guidance:
@@ -207,6 +215,8 @@ prompt_guidance:
         assert_eq!(cfg.defaults.get("gemini").unwrap(), "gemini-3.1-flash-image");
         assert_eq!(cfg.refine_model.as_deref(), Some("gemini-3.7-flash"));
         assert_eq!(cfg.image_tiers.get("high").unwrap().len(), 2);
+        assert_eq!(cfg.chat_tiers.get("high").unwrap().len(), 1);
+        assert!(!cfg.chat_tiers.contains_key("low"));
         assert_eq!(cfg.max_prompt_chars.get("gemini"), Some(&4000));
         assert!(cfg.prompt_guidance.contains_key("gemini"));
     }
