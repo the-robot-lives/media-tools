@@ -1373,6 +1373,50 @@ struct PromptsListQuery {
     slug: String,
     /// Optional node id (fim:paper_js, kind:image)
     id: Option<String>,
+    /// 1-based page number (default 1; clamped to the last page)
+    page: Option<usize>,
+    /// Items per page (default 24; clamped to 1..=200)
+    per_page: Option<usize>,
+}
+
+/// Default prompts per page for the lab listing.
+pub(crate) const DEFAULT_PAGE_SIZE: usize = 24;
+/// Upper bound so a hand-tuned `per_page` can't dump the whole catalog.
+pub(crate) const MAX_PAGE_SIZE: usize = 200;
+
+/// Window of items for one page of a listing.
+///
+/// Page numbers are 1-based; out-of-range requests clamp to the nearest valid
+/// page so stale links (deleted items, changed page size) still render.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PageWindow {
+    /// Index of the first item (for `skip`).
+    pub start: usize,
+    /// Exclusive end index (for `take`).
+    pub end: usize,
+    /// Clamped 1-based page number actually served.
+    pub page: usize,
+    /// Clamped items-per-page actually used.
+    pub per_page: usize,
+    /// Total pages at this page size (minimum 1, even for empty listings).
+    pub total_pages: usize,
+}
+
+impl PageWindow {
+    pub(crate) fn new(total: usize, page: Option<usize>, per_page: Option<usize>) -> Self {
+        let per_page = per_page.unwrap_or(DEFAULT_PAGE_SIZE).clamp(1, MAX_PAGE_SIZE);
+        let total_pages = total.div_ceil(per_page).max(1);
+        let page = page.unwrap_or(1).max(1).min(total_pages);
+        let start = (page - 1) * per_page;
+        let end = (start + per_page).min(total);
+        Self {
+            start,
+            end,
+            page,
+            per_page,
+            total_pages,
+        }
+    }
 }
 
 /// List demo + workspace prompts for a generator so the UI can refresh after scaffold.
@@ -1460,7 +1504,32 @@ async fn api_prompts_list(
         }
     }
 
-    Ok(Json(json!({ "slug": slug, "prompts": items })))
+    // Default listing order (matches what the UI showed pre-pagination):
+    // workspace prompts first, then newest-looking paths first.
+    items.sort_by(|a, b| {
+        let aw = a["source"].as_str() == Some("workspace");
+        let bw = b["source"].as_str() == Some("workspace");
+        bw.cmp(&aw).then_with(|| {
+            a["path"]
+                .as_str()
+                .unwrap_or("")
+                .cmp(b["path"].as_str().unwrap_or(""))
+                .reverse()
+        })
+    });
+
+    let total = items.len();
+    let win = PageWindow::new(total, q.page, q.per_page);
+    let prompts: Vec<_> = items.into_iter().skip(win.start).take(win.end - win.start).collect();
+
+    Ok(Json(json!({
+        "slug": slug,
+        "prompts": prompts,
+        "total": total,
+        "page": win.page,
+        "per_page": win.per_page,
+        "total_pages": win.total_pages,
+    })))
 }
 
 fn collect_prompts_matching(dir: &Path, slug: &str, out: &mut Vec<PathBuf>) {
@@ -2457,5 +2526,68 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let body = json!({ "error": self.message });
         (self.status, Json(body)).into_response()
+    }
+}
+
+#[cfg(test)]
+mod pagination_tests {
+    use super::{PageWindow, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE};
+
+    #[test]
+    fn defaults_when_no_query_params() {
+        let w = PageWindow::new(150, None, None);
+        assert_eq!(w.page, 1);
+        assert_eq!(w.per_page, DEFAULT_PAGE_SIZE);
+        assert_eq!(w.start, 0);
+        assert_eq!(w.end, DEFAULT_PAGE_SIZE);
+        assert_eq!(w.total_pages, 7); // 150 / 24 → 6.25 → 7
+    }
+
+    #[test]
+    fn middle_page_slices_correctly() {
+        let w = PageWindow::new(150, Some(3), Some(24));
+        assert_eq!(w.start, 48);
+        assert_eq!(w.end, 72);
+        assert_eq!(w.total_pages, 7);
+    }
+
+    #[test]
+    fn last_partial_page_clamps_end() {
+        let w = PageWindow::new(50, Some(3), Some(24));
+        assert_eq!(w.start, 48);
+        assert_eq!(w.end, 50);
+    }
+
+    #[test]
+    fn out_of_range_page_clamps_to_last() {
+        let w = PageWindow::new(50, Some(99), Some(24));
+        assert_eq!(w.page, 3);
+        assert_eq!(w.start, 48);
+        assert_eq!(w.end, 50);
+    }
+
+    #[test]
+    fn zero_page_clamps_to_first() {
+        let w = PageWindow::new(50, Some(0), None);
+        assert_eq!(w.page, 1);
+        assert_eq!(w.start, 0);
+    }
+
+    #[test]
+    fn per_page_clamped() {
+        let w = PageWindow::new(500, None, Some(0));
+        assert_eq!(w.per_page, 1);
+        let w = PageWindow::new(500, None, Some(10_000));
+        assert_eq!(w.per_page, MAX_PAGE_SIZE);
+        assert_eq!(w.total_pages, 3); // 500 / 200
+    }
+
+    #[test]
+    fn empty_listing_still_one_page() {
+        let w = PageWindow::new(0, Some(2), None);
+        assert_eq!(w.total_pages, 1);
+        assert_eq!(w.page, 1);
+        assert_eq!(w.start, 0);
+        assert_eq!(w.end, 0);
     }
 }
