@@ -1,0 +1,9 @@
+service: gemini
+model: gemini-3-pro-image
+timestamp: 1789526143
+eval_score: 0.800
+eval_notes: "Clear three-pane layout with vibrant gradient sidebar, system grey/blue accents, traffic-light controls, menu bar and dock all read as a native macOS Sonoma utility. Typography and density are appropriate. Minor deviation: sidebar gradient is more saturated than the 'subtle translucency' requested, but overall direction is legible and distinct."
+prompt: |
+  A macOS Sonoma desktop application window following Apple Human Interface Guidelines exactly. Three-pane layout: translucent vibrant sidebar source list, middle list of items, right inspector panel with form controls. SF Pro typography, system grey and blue accents, traffic-light window controls, rounded corners, subtle translucency. Looks like a stock Apple utility application.
+negative: |
+  garbled text, lorem ipsum, watermark, logo, photorealistic human, mobile phone frame, browser chrome, Windows UI, web page, tablet, iPhone

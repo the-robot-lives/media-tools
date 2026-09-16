@@ -1,0 +1,9 @@
+service: gemini
+model: gemini-3-pro-image
+timestamp: 1789526079
+eval_score: 0.900
+eval_notes: "Deep navy ground with fine cyan grid, monospace spec table on left, and dimensioned technical plates with callout lines and numeric scores on right all read clearly. Traffic-light controls, title bar, rounded corners and drop shadow make it read as a Mac window. Drafting/blueprint direction is distinct and well executed."
+prompt: |
+  A macOS desktop application window styled as a technical engineering drawing. Deep navy #0E2A47 ground with a fine cyan grid. Left panel: a specification document with monospace parameters in tabular rows. Right: image plates with measured callout lines, dimension annotations and numeric scores. Cyan #7FB3D5 rules on paper-white text. Drafting precision.
+negative: |
+  garbled text, lorem ipsum, watermark, logo, photorealistic human, mobile phone frame, browser chrome, Windows UI, web page, tablet, iPhone

@@ -1,0 +1,35 @@
+# Media Workbench — macOS UX direction mockup: Blueprint
+schema: "0.4"
+id: mw-direction-blueprint
+type: image
+service: gemini
+model: gemini-3-pro-image
+quality: high
+prompt:
+  text: |
+    A macOS desktop application window styled as a technical engineering drawing. Deep navy #0E2A47 ground with a fine cyan grid. Left panel: a specification document with monospace parameters in tabular rows. Right: image plates with measured callout lines, dimension annotations and numeric scores. Cyan #7FB3D5 rules on paper-white text. Drafting precision.
+  negative: >
+    garbled text, lorem ipsum, watermark, logo, photorealistic human,
+    mobile phone frame, browser chrome, Windows UI, web page, tablet, iPhone
+  style: "UI design mockup, straight-on screenshot framing, no perspective, no camera tilt"
+output:
+  formats:
+    - format: png
+      quality: 95
+  dimensions:
+    width: 2560
+    height: 1600
+    aspect_ratio: "16:10"
+eval:
+  pass_threshold: 0.7
+  criteria:
+    direction_legible:
+      weight: 0.4
+      description: "palette, density and material read clearly at a glance"
+    macos_native:
+      weight: 0.3
+      description: "reads as a Mac desktop application window"
+    distinct:
+      weight: 0.3
+      description: "not interchangeable with the other four directions"
+tags: [design-direction, macos, media-workbench]
