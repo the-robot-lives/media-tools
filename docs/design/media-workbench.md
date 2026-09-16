@@ -236,12 +236,27 @@ call time and never logged. Consequences:
   commit or sync.
 - `{keychain:}` maps to macOS Keychain / libsecret / Windows Credential Manager.
   This is what the GUI's key form writes when the user types a key directly.
-  **Integration gap:** tobor-kit's `LLMKeySpec` (`LLMInferenceConfig.swift`) has
-  only `literal` and `.environment` cases, so its `Codable` config cannot
-  round-trip a keychain spec. Either add a `.keychain` case upstream to the kit
-  (preferred — it is a general need, not ours alone) or keep keychain
-  indirection entirely in our `LLMInferenceConfigStoring` implementation and
-  hand the view a resolved `.environment`-shaped spec. Decide before §8 phase 2.
+  **Integration, resolved — no upstream change.** tobor-kit's `LLMKeySpec`
+  (`LLMInferenceConfig.swift`) has only `literal` and `.environment` cases and
+  cannot round-trip a keychain spec. Adding a `.keychain` case upstream was the
+  first instinct and is **rejected**: the Lit `LLMInferenceConfigData` carries
+  the same two-case spec, and the kit's worth is that its Lit, Hologram and
+  Swift mirrors agree. A Swift-only third case buys a local convenience at the
+  cost of the property that makes the kit valuable.
+
+  Instead the translation lives in our `LLMInferenceConfigStoring`
+  implementation, and the view never learns about it:
+
+  | direction | behaviour |
+  |---|---|
+  | **load** | read `{keychain: ref}` from YAML → fetch the secret from Keychain → hand the view a `.literal` holding the value, **in memory only** |
+  | **save** | view returns `.literal` → write the value to Keychain under `ref` → persist `{keychain: ref}` to YAML |
+
+  So `.literal` becomes an **in-process transport**, never a storage format. The
+  secret never reaches the YAML file, the kit stays unmodified, mirror parity
+  survives, and the view's contract is honoured exactly as written. The one rule
+  this imposes: the store must never write a `.literal` through to disk, which
+  is worth an explicit test.
 - `{literal:}` is supported for CI and headless use but the GUI **never writes
   it** and warns when it reads one.
 - Redaction is enforced in the core, not the UI, so the CLI benefits too.
