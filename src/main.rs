@@ -1,29 +1,18 @@
-mod attachments;
-mod dag;
-mod eval;
-mod fim;
-mod output;
-mod pipeline;
-mod prep;
-mod provider_config;
-mod providers;
-mod refine;
-mod renderers;
-mod schema;
-mod structural;
-mod test_lab;
-mod ui;
-mod validate;
+//! CLI shell for the media-tool library.
+//!
+//! This binary owns only CLI concerns: clap parsing, terminal rendering (dialoguer prompts,
+//! `ui::*` status lines), subprocess launching and process exit codes. All orchestration lives
+//! in the `media_tool` library so other front-ends can drive it without a terminal.
 
-use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use clap::{Parser, Subcommand};
 use dialoguer::MultiSelect;
 
-use pipeline::PipelineConfig;
-use schema::{parse_prompt_file, ParsedPrompt, Quality};
+use media_tool::orchestrator::{self, InputIssue};
+use media_tool::pipeline::PipelineConfig;
+use media_tool::{provider_config, test_lab, ui};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -130,7 +119,7 @@ async fn main() -> color_eyre::Result<()> {
     let cli = Cli::parse();
 
     // Load .envrc.k8.dc for API keys (GEMINI, SUNO, OPENAI, ELEVENLABS, DASHSCOPE)
-    try_load_envrc();
+    orchestrator::load_envrc();
 
     // Load runtime provider/model overrides (local or remote YAML)
     provider_config::init().await;
@@ -157,68 +146,23 @@ async fn main() -> color_eyre::Result<()> {
     }
 
     // Parse quality override
-    let quality_override: Option<Quality> = if let Some(ref q) = cli.quality {
-        match q.parse::<Quality>() {
-            Ok(v) => Some(v),
-            Err(e) => {
-                color_eyre::eyre::bail!("--quality: {}", e);
-            }
-        }
-    } else {
-        None
-    };
+    let quality_override = orchestrator::parse_quality_override(cli.quality.as_deref())?;
 
     // Expand inputs: plain directories become all *.prompt files within. Directories passed
     // via -r/--recursive are shown in an interactive multi-select first.
-    let mut prompt_files: Vec<PathBuf> = Vec::new();
-    for input in &cli.inputs {
-        if input.is_dir() {
-            let mut found: Vec<PathBuf> = Vec::new();
-            collect_prompt_files(input, &mut found);
-            found.sort();
-            if found.is_empty() {
-                ui::warn_msg(&format!(
-                    "No *.prompt files found in directory: {}",
-                    input.display()
-                ));
-            }
-            prompt_files.extend(found);
-        } else if input.is_file() {
-            prompt_files.push(input.clone());
-        } else {
-            ui::fail_msg(&format!("File or directory not found: {}", input.display()));
-        }
-    }
+    let resolved = orchestrator::expand_inputs(&cli.inputs, false);
+    report_input_issues(&resolved.issues);
+    let mut prompt_files: Vec<PathBuf> = resolved.files;
 
-    let mut selectable_prompt_files: Vec<PathBuf> = Vec::new();
-    for dir in &cli.recursive_dirs {
-        if dir.is_dir() {
-            let mut found: Vec<PathBuf> = Vec::new();
-            collect_prompt_files(dir, &mut found);
-            found.sort();
-            if found.is_empty() {
-                ui::warn_msg(&format!(
-                    "No *.prompt files found in directory: {}",
-                    dir.display()
-                ));
-            }
-            selectable_prompt_files.extend(found);
-        } else if dir.exists() {
-            ui::fail_msg(&format!(
-                "Recursive input is not a directory: {}",
-                dir.display()
-            ));
-        } else {
-            ui::fail_msg(&format!("Directory not found: {}", dir.display()));
-        }
-    }
+    let recursive = orchestrator::expand_inputs(&cli.recursive_dirs, true);
+    report_input_issues(&recursive.issues);
 
-    if !selectable_prompt_files.is_empty() {
-        let selected = select_prompt_files(selectable_prompt_files, &cli.recursive_dirs)?;
+    if !recursive.files.is_empty() {
+        let selected = select_prompt_files(recursive.files, &cli.recursive_dirs)?;
         prompt_files.extend(selected);
     }
 
-    prompt_files = normalize_prompt_files(prompt_files);
+    prompt_files = orchestrator::normalize_prompt_files(prompt_files);
 
     if prompt_files.is_empty() {
         color_eyre::eyre::bail!("No valid .prompt files to process");
@@ -231,10 +175,9 @@ async fn main() -> color_eyre::Result<()> {
 
     // Parse all prompt files
     ui::step("Loading prompt files");
-    let mut prompts = Vec::new();
-    for path in &prompt_files {
-        let p = parse_prompt_file(path)?;
-        if cli.verbose {
+    let verbose = cli.verbose;
+    let prompts = orchestrator::load_prompts(&prompt_files, &mut |path, p| {
+        if verbose {
             let svc = p.meta.service.as_deref().unwrap_or("auto");
             ui::verbose(&format!(
                 "Loaded: {} ({:?}, service={}, quality={}, schema=v{})",
@@ -245,8 +188,7 @@ async fn main() -> color_eyre::Result<()> {
                 p.meta.schema_version
             ));
         }
-        prompts.push(p);
-    }
+    })?;
     ui::ok(&format!("Loaded {} prompt file(s)", prompts.len()));
 
     // Run pipeline
@@ -270,73 +212,31 @@ async fn main() -> color_eyre::Result<()> {
         eval_model: cli.eval_model,
     };
 
-    pipeline::run_generation(prompts, &config).await?;
+    orchestrator::run_generation(prompts, &config).await?;
 
     Ok(())
 }
 
-fn try_load_envrc() {
-    let candidates = [
-        std::env::var("INFRA_ROOT")
-            .ok()
-            .map(|r| PathBuf::from(r).join(".envrc.k8.dc")),
-        std::env::var("HOME")
-            .ok()
-            .map(|h| PathBuf::from(h).join(".envrc.k8.dc")),
-    ];
-
-    for candidate in candidates.into_iter().flatten() {
-        if candidate.is_file() {
-            if let Ok(content) = std::fs::read_to_string(&candidate) {
-                for line in content.lines() {
-                    let line = line.trim();
-                    if let Some(rest) = line.strip_prefix("export ") {
-                        if let Some((key, val)) = rest.split_once('=') {
-                            let key = key.trim();
-                            let val = val.trim().trim_matches('"').trim_matches('\'');
-                            if std::env::var(key).is_err() {
-                                std::env::set_var(key, val);
-                            }
-                        }
-                    }
-                }
+fn report_input_issues(issues: &[InputIssue]) {
+    for issue in issues {
+        match issue {
+            InputIssue::EmptyDirectory(path) => ui::warn_msg(&format!(
+                "No *.prompt files found in directory: {}",
+                path.display()
+            )),
+            InputIssue::NotADirectory(path) => ui::fail_msg(&format!(
+                "Recursive input is not a directory: {}",
+                path.display()
+            )),
+            InputIssue::NotFound(path) => {
+                ui::fail_msg(&format!("File or directory not found: {}", path.display()))
             }
-        }
-    }
-}
-
-fn collect_prompt_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    for entry in entries.filter_map(|e| e.ok()) {
-        let path = entry.path();
-        if path.is_dir() {
-            // Skip hidden directories (.genai.*, .DS_Store dirs, etc.)
-            if path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map(|n| n.starts_with('.'))
-                .unwrap_or(false)
-            {
-                continue;
-            }
-            collect_prompt_files(&path, out);
-        } else if path.is_file()
-            && path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map(|n| n.ends_with(".prompt"))
-                .unwrap_or(false)
-        {
-            out.push(path);
         }
     }
 }
 
 fn select_prompt_files(files: Vec<PathBuf>, roots: &[PathBuf]) -> color_eyre::Result<Vec<PathBuf>> {
-    let files = normalize_prompt_files(files);
+    let files = orchestrator::normalize_prompt_files(files);
     let labels: Vec<String> = files
         .iter()
         .map(|path| selection_label(path, roots))
@@ -387,29 +287,13 @@ fn selection_label(path: &Path, roots: &[PathBuf]) -> String {
     path.display().to_string()
 }
 
-fn normalize_prompt_files(files: Vec<PathBuf>) -> Vec<PathBuf> {
-    let mut seen = HashSet::new();
-    let mut normalized = Vec::new();
-
-    for path in files {
-        let path = path.canonicalize().unwrap_or(path);
-        let key = path.to_string_lossy().into_owned();
-        if seen.insert(key) {
-            normalized.push(path);
-        }
-    }
-
-    normalized.sort();
-    normalized
-}
-
 fn launch_zellij_batches(prompt_files: &[PathBuf], cli: &Cli) -> color_eyre::Result<()> {
     if std::env::var_os("ZELLIJ").is_none() {
         color_eyre::eyre::bail!("-j/--jobs requires running inside a zellij session");
     }
 
     let pane_count = cli.jobs.min(prompt_files.len());
-    let batches = build_zellij_batches(prompt_files, pane_count)?;
+    let batches = orchestrator::build_batches(prompt_files, pane_count)?;
 
     if batches.is_empty() {
         color_eyre::eyre::bail!("No prompt batches to launch");
@@ -495,130 +379,5 @@ fn append_worker_args(command: &mut Command, cli: &Cli) {
     }
     if let Some(eval_model) = &cli.eval_model {
         command.arg("--eval-model").arg(eval_model);
-    }
-}
-
-fn build_zellij_batches(
-    prompt_files: &[PathBuf],
-    pane_count: usize,
-) -> color_eyre::Result<Vec<Vec<PathBuf>>> {
-    if pane_count == 0 || prompt_files.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let prompts = prompt_files
-        .iter()
-        .map(|path| parse_prompt_file(path))
-        .collect::<color_eyre::Result<Vec<_>>>()?;
-
-    let groups = dependency_groups(&prompts)?;
-    let mut batches = vec![Vec::new(); pane_count];
-    let mut batch_sizes = vec![0usize; pane_count];
-
-    for group in groups {
-        let batch_index = batch_sizes
-            .iter()
-            .enumerate()
-            .min_by_key(|(_, size)| **size)
-            .map(|(index, _)| index)
-            .unwrap_or(0);
-
-        for prompt_index in group {
-            batches[batch_index].push(prompt_files[prompt_index].clone());
-            batch_sizes[batch_index] += 1;
-        }
-    }
-
-    batches.retain(|batch| !batch.is_empty());
-    Ok(batches)
-}
-
-fn dependency_groups(prompts: &[ParsedPrompt]) -> color_eyre::Result<Vec<Vec<usize>>> {
-    let mut by_id: HashMap<String, usize> = HashMap::new();
-    let mut by_path: HashMap<String, usize> = HashMap::new();
-
-    for (index, prompt) in prompts.iter().enumerate() {
-        if by_id.insert(prompt.meta.id.clone(), index).is_some() {
-            color_eyre::eyre::bail!("Duplicate prompt ID: {}", prompt.meta.id);
-        }
-        by_path.insert(path_key(&prompt.meta.path), index);
-    }
-
-    let mut dsu = DisjointSet::new(prompts.len());
-
-    for (index, prompt) in prompts.iter().enumerate() {
-        for dep in &prompt.payload.depends_on {
-            let ref_id = dep.ref_id();
-            let dependency_index = if let Some(found) = by_id.get(ref_id) {
-                *found
-            } else {
-                let dep_path = prompt.meta.output_dir.join(ref_id);
-                let dep_key = path_key(&dep_path);
-                *by_path.get(&dep_key).ok_or_else(|| {
-                    color_eyre::eyre::eyre!(
-                        "Selected prompt {} depends on '{}' but that prompt was not selected",
-                        prompt.meta.path.display(),
-                        ref_id
-                    )
-                })?
-            };
-
-            dsu.union(index, dependency_index);
-        }
-    }
-
-    let mut by_root: HashMap<usize, Vec<usize>> = HashMap::new();
-    for index in 0..prompts.len() {
-        by_root.entry(dsu.find(index)).or_default().push(index);
-    }
-
-    let mut groups: Vec<Vec<usize>> = by_root.into_values().collect();
-    groups.sort_by_key(|group| group.iter().copied().min().unwrap_or(usize::MAX));
-    Ok(groups)
-}
-
-fn path_key(path: &Path) -> String {
-    path.canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf())
-        .to_string_lossy()
-        .into_owned()
-}
-
-struct DisjointSet {
-    parent: Vec<usize>,
-    rank: Vec<usize>,
-}
-
-impl DisjointSet {
-    fn new(len: usize) -> Self {
-        Self {
-            parent: (0..len).collect(),
-            rank: vec![0; len],
-        }
-    }
-
-    fn find(&mut self, index: usize) -> usize {
-        if self.parent[index] != index {
-            self.parent[index] = self.find(self.parent[index]);
-        }
-        self.parent[index]
-    }
-
-    fn union(&mut self, left: usize, right: usize) {
-        let left_root = self.find(left);
-        let right_root = self.find(right);
-
-        if left_root == right_root {
-            return;
-        }
-
-        match self.rank[left_root].cmp(&self.rank[right_root]) {
-            std::cmp::Ordering::Less => self.parent[left_root] = right_root,
-            std::cmp::Ordering::Greater => self.parent[right_root] = left_root,
-            std::cmp::Ordering::Equal => {
-                self.parent[right_root] = left_root;
-                self.rank[left_root] += 1;
-            }
-        }
     }
 }

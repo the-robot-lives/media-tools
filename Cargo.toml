@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Generate media assets from .media.prompt YAML files"
 
+[lib]
+name = "media_tool"
+path = "src/lib.rs"
+
 [[bin]]
 name = "generate-media-prompt"
 path = "src/main.rs"
