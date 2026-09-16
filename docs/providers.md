@@ -48,6 +48,59 @@ post_processing:
 
 ---
 
+## Gemini image model minimum (enforced)
+
+`gemini` **image** generation requires Gemini **3 or newer**. This is a runtime guard,
+not a default: `src/providers/gemini.rs::validate_image_model` reads the major version
+out of the model id and rejects anything below `3`, anything carrying no explicit
+version, and anything that is not an image model id.
+
+### Why the floor is a major version, not `>= 3.1`
+
+Gemini image model ids are not ordered by quality. `gemini-3-pro-image` (Nano Banana
+Pro) is the highest-quality image model in the lineup, but its id carries no minor
+version, so any `>= 3.1` comparison sorts it *below* `gemini-3.1-flash-image` and
+rejects it — silently demoting the `high` tier to a flash model. The guard exists to
+stop spend on *stale* models, so it gates on the generation only: the whole 3.x family
+is in, 2.x and older are out, and a future 4.x needs no change to the rule.
+
+### Enforcement points
+
+- `pipeline::enforce_gemini_image_minimum` validates every resolved `gemini` image
+  candidate *before* prompt prep, eval, or any HTTP call — so `--dry-run` fails too.
+- `GeminiProvider::generate` re-validates, so any other caller of the provider is
+  covered.
+
+### Routes checked
+
+Every route a model id can arrive by, because all of them land in the resolved
+candidate list:
+
+| Source | Example |
+|---|---|
+| prompt file | `service: gemini` + `model: gemini-2.5-flash-image` |
+| CLI override | `--service gemini --model gemini-2.5-flash-image` |
+| `media-tool.yaml` tier | `image_tiers.high: [gemini:gemini-2.5-flash-image]` |
+| built-in ladder | `providers::candidates_for` |
+| provider option | `provider_options.generate_content_model` |
+
+### Verdict per id
+
+| Model id | Result |
+|---|---|
+| `gemini-3-pro-image` | allowed (Nano Banana Pro; `high` tier head) |
+| `gemini-3.1-flash-image` | allowed (default) |
+| `gemini-3.1-flash-lite-image` | allowed |
+| `gemini-2.5-flash-image` | rejected — Gemini 2 |
+| `nano-banana`, `nano-banana-pro`, `gemini-flash-image-latest` | rejected — unversioned alias, could resolve to anything |
+| `gemini-3.1-flash`, `gemini-3-pro` | rejected — not image model ids |
+
+`gemini-chat` and other text models are **not** affected.
+
+`generate-media-prompt models` prints the documented catalog and this policy offline
+(no config fetch, no API key). Catalog verified 2026-09-07 against
+https://ai.google.dev/gemini-api/docs/image-generation.
+
 ## Status Overview
 
 ### Media Providers

@@ -16,6 +16,68 @@ const INITIAL_BACKOFF_SECS: u64 = 2;
 #[allow(dead_code)]
 const GENERATE_CONTENT_MODEL: &str = "gemini-3.1-flash-image";
 
+/// Lowest Gemini generation permitted for image generation.
+///
+/// The floor is a **major** version, deliberately. The obvious reading of "use the
+/// current models" would be `>= 3.1`, and that is wrong here: `gemini-3-pro-image`
+/// (Nano Banana Pro) is the highest-quality image model in the lineup, but its id
+/// carries no minor version, so any `>= 3.1` comparison sorts it *below*
+/// `gemini-3.1-flash-image` and rejects it. Gemini image ids are not ordered by
+/// quality — the "pro" tier numbers lower than the "flash" tier — so comparing
+/// minor versions across the family is meaningless. The guard exists to stop spend
+/// on *stale* models, so it gates on the generation only: the whole 3.x family is
+/// in, 2.x and older are out, and a future 4.x needs no change here.
+const MINIMUM_MAJOR_VERSION: u32 = 3;
+
+/// Offline catalog verified against Google's image-generation guide, 2026-09-07.
+pub const IMAGE_MODELS: &str = "Gemini image models (documented catalog; account availability may vary):\n  gemini-3-pro-image           supported (Nano Banana Pro)\n  gemini-3.1-flash-image       supported (Nano Banana 2; default)\n  gemini-3.1-flash-lite-image  supported (Nano Banana 2 Lite)\n  gemini-2.5-flash-image       blocked: Gemini 2 (Nano Banana)\nSource: https://ai.google.dev/gemini-api/docs/image-generation\nRun: generate-media-prompt models";
+
+/// Major version of a Gemini model id, or `None` when the id carries no explicit one.
+///
+/// Accepts both `gemini-3-pro-image` (bare major) and `gemini-3.1-flash-image`
+/// (major.minor); only the leading integer is read. An optional `models/` prefix is
+/// tolerated because that is how the API spells ids in some responses.
+fn major_version(model: &str) -> Option<u32> {
+    model
+        .strip_prefix("models/")
+        .unwrap_or(model)
+        .strip_prefix("gemini-")?
+        .split('-')
+        .next()?
+        .split('.')
+        .next()?
+        .parse::<u32>()
+        .ok()
+}
+
+/// Whether a model id names an image model rather than a text/chat one.
+fn is_image_model(model: &str) -> bool {
+    model.split('-').any(|segment| segment == "image")
+}
+
+pub fn validate_image_model(model: &str) -> color_eyre::Result<()> {
+    let id = model.strip_prefix("models/").unwrap_or(model);
+    // An unversioned alias (`nano-banana`, `gemini-flash-image-latest`) returns None:
+    // it may resolve to anything, so it can never satisfy a minimum.
+    if major_version(id).is_some_and(|major| major >= MINIMUM_MAJOR_VERSION) && is_image_model(id) {
+        return Ok(());
+    }
+    color_eyre::eyre::bail!("Gemini image model '{model}' is not allowed. Use Gemini {MINIMUM_MAJOR_VERSION} or newer. Give an explicit versioned image model ID; unversioned aliases cannot guarantee the minimum.\n{IMAGE_MODELS}");
+}
+
+pub fn validate_image_options(options: &GenerationOptions) -> color_eyre::Result<()> {
+    validate_image_model(&options.model)?;
+    if let Some(value) = options.provider_options.get("generate_content_model") {
+        let model = value.as_str().ok_or_else(|| {
+            color_eyre::eyre::eyre!(
+                "generate_content_model must be a versioned Gemini image model string"
+            )
+        })?;
+        validate_image_model(model)?;
+    }
+    Ok(())
+}
+
 pub struct GeminiProvider;
 
 #[async_trait::async_trait]
@@ -28,6 +90,7 @@ impl MediaProvider for GeminiProvider {
         options: &GenerationOptions,
         attachments: &[LoadedAttachment],
     ) -> color_eyre::Result<bool> {
+        validate_image_options(options)?;
         // All gemini image models now require generateContent (`:predict` was
         // removed from the API — returns 404 NOT_FOUND for image models).
         self.generate_content(prompt_text, output_path, api_key, options, attachments)
@@ -92,8 +155,8 @@ impl GeminiProvider {
         options: &GenerationOptions,
     ) -> color_eyre::Result<bool> {
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:predict?key={}",
-            options.model, api_key
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:predict",
+            options.model
         );
 
         let mut params = json!({ "sampleCount": 1 });
@@ -135,7 +198,7 @@ impl GeminiProvider {
         }
 
         let result = self
-            .post_with_retry(&url, &body, output_path, options.verbose)
+            .post_with_retry(&url, api_key, &body, output_path, options.verbose)
             .await?;
         let Some(result) = result else {
             return Ok(false);
@@ -182,8 +245,8 @@ impl GeminiProvider {
             .unwrap_or(&options.model);
 
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            model, api_key
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            model.strip_prefix("models/").unwrap_or(model)
         );
 
         let mut parts: Vec<serde_json::Value> = Vec::new();
@@ -228,7 +291,7 @@ impl GeminiProvider {
         }
 
         let result = self
-            .post_with_retry(&url, &body, output_path, options.verbose)
+            .post_with_retry(&url, api_key, &body, output_path, options.verbose)
             .await?;
         let Some(result) = result else {
             return Ok(false);
@@ -279,6 +342,7 @@ impl GeminiProvider {
     async fn post_with_retry(
         &self,
         url: &str,
+        api_key: &str,
         body: &serde_json::Value,
         output_path: &Path,
         verbose: bool,
@@ -296,6 +360,7 @@ impl GeminiProvider {
             let resp = client
                 .post(url)
                 .header("Content-Type", "application/json")
+                .header("x-goog-api-key", api_key)
                 .json(body)
                 .timeout(Duration::from_secs(120))
                 .send()
@@ -316,7 +381,11 @@ impl GeminiProvider {
                     }
 
                     let status_code = status.as_u16();
-                    let error_body = response.text().await.unwrap_or_default();
+                    let error_body = response
+                        .text()
+                        .await
+                        .unwrap_or_default()
+                        .replace(api_key, "[REDACTED]");
 
                     match status_code {
                         429 if attempt < MAX_RETRIES => {
@@ -379,7 +448,7 @@ impl GeminiProvider {
                     tel::fail_msg(&format!(
                         "Network error for {}: {}",
                         output_path.display(),
-                        e
+                        e.without_url()
                     ));
                     if attempt < MAX_RETRIES {
                         progress::provider_retry(
@@ -402,5 +471,62 @@ impl GeminiProvider {
         }
 
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod image_policy_tests {
+    use super::*;
+
+    /// The whole policy in one test: the best model in the lineup is in, the stale
+    /// generation is out. `gemini-3-pro-image` has no minor version and must not be
+    /// read as "older than 3.1".
+    #[test]
+    fn admits_gemini_3_pro_and_rejects_gemini_2() {
+        assert!(validate_image_model("gemini-3-pro-image").is_ok());
+        assert!(validate_image_model("gemini-2.5-flash-image").is_err());
+    }
+
+    #[test]
+    fn accepts_the_whole_3x_family_and_later() {
+        for id in [
+            "gemini-3-pro-image",
+            "gemini-3.0-flash-image",
+            "gemini-3.1-flash-image",
+            "gemini-3.1-flash-lite-image",
+            "gemini-3.10-flash-image",
+            "models/gemini-3.1-flash-image-preview",
+            "gemini-4-flash-image",
+            "gemini-4-pro-image",
+        ] {
+            assert!(validate_image_model(id).is_ok(), "{id}");
+        }
+    }
+
+    #[test]
+    fn rejects_gemini_2_aliases_and_non_image_models() {
+        for id in [
+            // stale generation
+            "gemini-2.5-flash-image",
+            "gemini-2-pro-image",
+            "gemini-1.5-flash-image",
+            // unversioned aliases: could resolve to anything
+            "nano-banana",
+            "nano-banana-pro",
+            "gemini-flash-image-latest",
+            // text models are out of scope for the image guard
+            "gemini-3.1-flash",
+            "gemini-3-pro",
+        ] {
+            let error = validate_image_model(id).unwrap_err().to_string();
+            assert!(error.contains("Use Gemini 3 or newer"), "{id}: {error}");
+            assert!(error.contains("gemini-3-pro-image"), "{id}");
+        }
+    }
+
+    #[test]
+    fn catalog_lists_3_pro_as_supported() {
+        assert!(IMAGE_MODELS.contains("gemini-3-pro-image           supported"));
+        assert!(IMAGE_MODELS.contains("gemini-2.5-flash-image       blocked"));
     }
 }
