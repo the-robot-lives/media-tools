@@ -619,6 +619,138 @@ command palette in v1 — this is a tool used deliberately, not at speed.
      is how people misconfigure cascades.
    - **Snippets**: the house-style library, plain text editing.
 
+### 5.4 Results & Grade — detailed design
+
+Direction: Darkroom (`macos/design-direction/CHOSEN.md`). The reference image is
+intent, not template; the divergences below are deliberate and reasoned.
+
+#### Divergence 1 — the context bar (the reference's main failure)
+
+The mockup collapses chrome to a bare strip. That is wrong here. The two
+questions asked most often while judging output are *"what produced this?"* and
+*"what did I actually ask for?"*, and an interface that hides both forces a trip
+back to the editor on every doubt.
+
+So Results keeps a **slim context bar** (single line, ~28pt): run name · resolved
+`service/model` · attempt *n* of *m* · elapsed · cost-if-known. The resolved
+provider carries the **provenance popover** from §4.3 — click it and see which
+cascade layer won. This is the smallest chrome that answers both questions
+without becoming a toolbar.
+
+Everything else about Darkroom's restraint is kept: no sidebar on this screen,
+no inspector by default, no window-chrome ornament.
+
+#### Layout at real density
+
+Sized for 1440×900 (the floor, not the target):
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ hero-shot · grok/grok-2-image · attempt 2/3 · 1m14s · $0.04│ 28pt context bar
+├────────────────────────────────────────────────────────────┤
+│                                                            │
+│                   ┌──────────────────┐                     │
+│                   │                  │                     │ hero ≥55% height
+│                   │   the artifact   │                     │ fit-to-window,
+│                   │                  │                     │ never upscaled
+│                   └──────────────────┘                     │
+│                                                            │
+├────────────────────────────────────────────────────────────┤
+│  ▣92    ▢88    ▢85    ▢50                                  │ 96pt candidate rail
+└────────────────────────────────────────────────────────────┘
+```
+
+- Hero is **fit, never fill** — an upscaled artifact misrepresents what was
+  generated, and this screen exists to judge exactly that.
+- Candidate rail is a single row, left-aligned, not centred: it grows rightward
+  with attempts and a centred row would shift every thumbnail on each new one.
+- Grade panel is a **right drawer**, closed by default, 320pt, over the hero
+  rather than resizing it — so toggling it never changes the artifact's size
+  mid-comparison.
+
+#### Scores on thumbnails
+
+From the reference: a numeric badge per candidate. Refined:
+
+- Badge shows the **weighted total, 0-100**, not the 0-1 float. Two digits read
+  at thumbnail size; `0.87` does not.
+- Colour encodes the **gate**, not the number: passed `#4ADE80`, failed
+  `#F87171`, ungraded neutral. A 50 and an 85 that both failed `required_pass`
+  should look equally rejected, because they are.
+- The selected candidate gets a 2pt accent ring, not a fill — a fill would
+  change the thumbnail's apparent colour, which is the thing under judgement.
+
+#### Grade panel — borrowed from Blueprint
+
+Blueprint's annotated plates were the one transferable idea from a render that
+otherwise depicted a CAD tool. Applied:
+
+```
+weighted total              87 / 100     PASSED
+─────────────────────────────────────────────
+composition      0.40  ×  92  =  36.8
+palette          0.35  ×  85  =  29.8
+legibility       0.25  ×  81  =  20.3        ← required, passed
+─────────────────────────────────────────────
+reject_if        none triggered
+```
+
+Ordering rules: **failed `required_pass` criteria float to the top**, then
+triggered `reject_if`, then the rest by weight descending. A grade you have to
+scan for the failure is a grade that gets skimmed.
+
+The grader's prose reasoning sits below the table, not above it — the numbers
+are the index, the prose is the detail.
+
+**Scores are explanations, not verdicts.** The user can override a grade, and
+the override requires a reason string. Overrides are stored on the attempt and
+shown distinctly from machine grades; a run whose grade was overridden must
+never be indistinguishable from one that passed on its own.
+
+#### Keyboard — this screen is keyboard-first
+
+Judging is repetitive, which is exactly when a mouse becomes the bottleneck.
+Lightroom's model, adapted:
+
+| key | action |
+|---|---|
+| `←` `→` | previous / next candidate |
+| `space` | toggle fit ↔ 100% |
+| `↩` | promote — mark this the chosen artifact |
+| `x` | reject |
+| `g` | toggle grade drawer |
+| `r` | revise from this candidate (opens Revise with it as parent) |
+| `⌘.` | cancel the running generation |
+
+Focus starts on the candidate rail, not the hero, so arrow keys work without a
+click. `⌘.` is deliberately the system cancel idiom — a minutes-long paid
+operation must be abortable without hunting for a button.
+
+#### Tokens (Darkroom)
+
+| token | value | note |
+|---|---|---|
+| `canvas` | `#0A0A0B` | near-black so generated colour dominates |
+| `panel` | `#141415` | drawer, context bar |
+| `text` | `#E8E6E3` | |
+| `muted` | `#8A8785` | secondary metadata |
+| `accent` | `#C9A227` | selection ring; warm neutral, does **not** compete with image colour |
+| `pass` / `fail` | `#4ADE80` / `#F87171` | gate only, never decoration |
+
+The accent choice is load-bearing: a saturated blue or teal accent sitting
+beside generated imagery shifts the perceived colour of the thing being judged.
+A warm brass reads as "selected" while staying out of the way.
+
+#### States (extends §5.1)
+
+| state | Results behaviour |
+|---|---|
+| generating | rail shows a placeholder tile with progress; hero shows the newest complete attempt, **not** a spinner — previous output stays judgeable while the next renders |
+| all attempts failed | no hero; the failure and the provider's own error text, verbatim |
+| ungraded | badges neutral, grade drawer offers "grade now"; never an implied pass |
+| no preview for type | metadata card + Reveal in Finder + Open With — audio gets a waveform and transport, text/markup gets source with syntax highlight |
+| grade overridden | badge carries an override glyph; drawer shows machine score, override, and reason |
+
 ### 5.3 Capabilities panel (detect + degrade)
 
 `is_available()` already exists on every renderer. Extend the same probe to the
