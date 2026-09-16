@@ -18,7 +18,7 @@ impl ChatProvider for ZaiProvider {
         attachments: &[LoadedAttachment],
     ) -> color_eyre::Result<bool> {
         openai_compatible_generate(
-            "https://api.x.ai/v1/chat/completions",
+            "https://api.z.ai/v1/chat/completions",
             system_prompt,
             user_prompt,
             output_path,
