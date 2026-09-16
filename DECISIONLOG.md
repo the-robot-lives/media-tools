@@ -206,6 +206,29 @@ relayed a design-doc proposal as though it were shipped code (`base_url` overrid
 the claim that SVG was not a supported type). Making the agent check is more reliable than
 my resolving to be more careful.
 
+### Worktrees are cut from `origin/develop`, never bare `develop`
+
+`git worktree add .claude/worktrees/<name> -b <branch> develop` resolves the **local**
+`develop` ref. Local `develop` drifts behind the remote constantly — PRs merge on origin and
+nothing fast-forwards the local checkout — so every worktree cut this way silently inherits a
+stale base.
+
+Briefs must say `origin/develop`, after an explicit `git fetch origin`.
+
+**Why this is here:** on 2026-09-16 two agents were launched against a local `develop` that was
+5 commits stale (ad33efa vs 58689ec). Their trees had no `src/telemetry.rs` and no
+`src/term_layer.rs` — introduced by PR #16 — after both had been briefed to read exactly those
+files. It surfaced only because a third, unrelated agent mentioned the stale ref as an
+incidental footnote in its own report.
+
+**The rebase is not the fix.** A clean rebase means no textual conflict; it does not mean the
+code is correct. Work authored against a pre-refactor tree can call the replaced code path and
+still rebase without conflict. That has already happened once in this repo: a conflict-free
+rebase left 4 unconverted `ui::` call sites, making suno's rate-limit retries invisible to any
+GUI, with no failing test. After any such rebase, every site the agent authored must be grepped
+against the post-refactor API — and any byte-identical output diff must be retaken against the
+current base, since a diff against the stale base proves nothing.
+
 ### Squash-merge artifacts are not orphaned work
 
 `git branch --no-merged` lists branches that were squash-merged. The check for genuinely
