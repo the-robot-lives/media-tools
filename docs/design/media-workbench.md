@@ -1,8 +1,10 @@
 # Media Workbench — Desktop App Design
 
 Status: **draft for review** · Author: Loom · Date: 2026-09-16
-Scope: a cross-platform desktop application for end-to-end oversight of media
-generation, built on the existing `generate-media-prompt` Rust CLI.
+**Goal: a macOS application for the end-to-end media-tool cycle.** Linux and
+Windows are planned (§3.2) but explicitly not the target of this milestone —
+every sequencing decision below optimises for reaching a working macOS app,
+built on the existing `generate-media-prompt` Rust crate.
 
 ---
 
@@ -593,21 +595,50 @@ Add `source/media-tool` to `SUBDIRS` in `Portfolio/Utilities/Makefile` so
 
 ## 7. Open questions
 
-1. **Which converters earn a renderer slot?** SVG already works (§4.4). MIDI
-   needs exactly one new renderer — `abc2midi` or `lilypond` — and `lilypond`
-   also buys `.pdf`/`.ly`. Beyond music: `pandoc` would unlock the entire
-   document family (docx, epub, odt) through one binary, and `latexmk` the PDF
-   family. Each renderer is a bounded addition with an `is_available()` probe.
-   *Which families matter first — music, documents, or both?*
-2. **How large is the shipped type registry?** The registry makes types cheap,
-   but someone still writes each entry's system prompt and validator. A
-   plausible v1 is ~40 curated types across text/markup/data/music/document
-   families, with the rest user-added. *Is 40 the right order of magnitude?*
-3. **Binary formats need a converter contract.** Chat providers write UTF-8
-   only. `.mid`, `.epub` and `.docx` are all reachable via `render` (text →
-   converter), but that means the registry's `via:` field is load-bearing and
-   needs a real spec. *Confirm the text-intermediate approach is acceptable
-   versus waiting for providers that emit binary directly.*
+> Questions 1-3 were delegated to author discretion and are **resolved** below.
+> The rationale is recorded because the reasoning, not the answer, is what a
+> reviewer needs in order to disagree usefully.
+
+1. **RESOLVED — converters: `abc2midi` and `pandoc` in phase 0c; lilypond
+   deferred.** The expensive part is the `via:` intermediate contract, not any
+   individual converter; the second converter is nearly free once the mechanism
+   exists. So the two chosen each pay for a different reason. `abc2midi` is a
+   tiny dependency and exercises the **hard** path — a binary artifact produced
+   from a text intermediate — which is precisely the contract worth proving
+   first, and it delivers MIDI. `pandoc` has the widest fan-out per binary of
+   any converter available: docx, epub, odt, rst, org, asciidoc, mediawiki and
+   more, from one dependency and one probe. **Lilypond is deferred**: ~200 MB,
+   finicky, and redundant for MIDI now that `abc2midi` covers it — it earns a
+   slot only when engraved `.pdf` scores are actually wanted. `latexmk` follows
+   the same rule and waits for a real LaTeX→PDF need.
+
+2. **RESOLVED — the registry is tiered, not sized.** "~40 types" was the wrong
+   shape of answer: it implies forty equally-supported things, when the real
+   per-type cost is the **system prompt**, and forty hand-written ones would
+   mostly be mediocre. Three tiers instead, with honest labels:
+
+   | tier | count | contents | support |
+   |---|---|---|---|
+   | **curated** | ~15 | hand-written system prompt, validator, eval criteria | first-class; these are the types we use daily |
+   | **declared** | ~60 | extension + mime + modality only; generic text handling | works, but unpolished — labelled as such in the UI and `--list-types` |
+   | **user** | unbounded | `~/.config/media-tool/types.d/` | whatever the user writes |
+
+   Curated v1: `svg, mermaid, plantuml, graphviz, latex, typst, html, markdown,
+   csv, json, yaml, sql, dockerfile, abc, musicxml`. Everything else starts
+   declared and gets promoted when someone cares enough to write its prompt.
+   This keeps the type count large and honest at the same time, and makes
+   promotion a visible, low-ceremony act rather than a code change.
+
+3. **RESOLVED — text-intermediate is the contract; binary-direct is not
+   required.** Every reachable binary format goes text → converter, and the
+   registry's `via:` field names the intermediate. This is accepted rather than
+   waiting for providers that emit binary directly, for three reasons: it is
+   the pattern already shipping (`mermaid` via `mmdc`); the intermediate is
+   **inspectable and diffable**, so a bad `.mid` can be debugged by reading its
+   ABC rather than hex-dumping a binary; and it means a revision loop can
+   operate on text the LLM can actually re-edit. Providers that emit binary
+   directly remain welcome later as a `media`-modality addition — the registry
+   accommodates both without a schema change.
 4. **Linux toolkit** — GTK4 vs Qt. GTK4 is the lighter dependency; Qt has better
    Windows story if the two ever converge. Not urgent until platform two.
 5. **Cost tracking.** Attempts record duration; should they record spend? Every
