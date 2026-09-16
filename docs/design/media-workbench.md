@@ -46,8 +46,32 @@ load-bearing: the design reuses these rather than rebuilding them.**
 | Test lab | `src/test_lab/` | axum server, `make lab`, static HTML via `include_str!` |
 | Terminal UI | `ratatui` 0.29 + `crossterm` 0.28 already in `Cargo.toml` | |
 
-**Media types today:** `image`, `audio`, `voice`, `music`, `sfx`, `video`,
-`component`, `react-page`, `html`, `style-guide`, `diagram`, `document`.
+**The `type` field is an open `String`, not an enum** (`src/schema.rs:66-67`,
+default `"image"`). Nothing validates it. It is *mapped* — not checked — into a
+closed internal `AssetType` (`src/schema.rs:317-328`): `Image, Audio, Video,
+Component, ReactPage, Html, StyleGuide, Diagram, Document, Unknown`.
+`AssetType::from_type_str` (`src/schema.rs:343-358`) recognises 12 strings —
+`image, audio, voice, music, sfx, video, component, react-page, html,
+style-guide, diagram, document` — which collapse to 9 concrete variants.
+Anything else becomes `Unknown`.
+
+**`output.formats[].format` is also an open `String`** (`src/schema.rs:149-150`)
+and is used **verbatim as the file extension**
+(`output.join(format!("{}.{}", stem, fmt.format))`, `src/output.rs:16`).
+`output.text_format` (`schema.rs:142`) and `output.diagram_type`
+(`schema.rs:140`) are likewise open `Option<String>`.
+
+**The chat write path is format-agnostic:** `sanitize_chat_output(content,
+path)` then `fs::write` (`providers/openai_chat.rs:159-163`,
+`anthropic.rs:126-130`, `gemini_chat.rs:127-131`). The sanitiser strips markdown
+fences for everything and has extension-specific repair only for `svg`, `mmd`,
+`puml` (`providers/mod.rs:359-417`, `_ => {}`).
+
+**FIM guidance is already file-driven**, not code-gated: `solution/<text_format>.md`
+is looked up on disk (`src/fim.rs:125-128`), with existing solution docs for
+graphviz, drawio, abc, plantuml, mermaid, latex, typst, lilypond, wavedrom,
+katex, html, markdown and svg. This is the precedent the type registry in §4.4
+follows.
 
 **Providers today:** anthropic, dashscope, elevenlabs, gemini, gemini_chat,
 grok_video, groq_chat, openai_chat, openai_tts, openrouter, qwen_image, qwen_tts,
@@ -81,8 +105,13 @@ Existing keys: `defaults`, `image_tiers`, `max_prompt_chars`, `refine_model`,
    is no `release`/`package`/`dist` target, **no Rust build in CI at all** (the
    only workflow builds the marketing site), and no cross-compilation setup.
    media-tool is also absent from the `Portfolio/Utilities` harness `SUBDIRS`.
-6. **No SVG or MIDI type.** Both were named in the request; neither exists.
-   See §7.
+6. **No open type registry.** The `type` string is open but the machinery
+   behind it is a fixed enum plus a handful of whitelists, so an unrecognised
+   type degrades badly rather than working generically. See §4.4 — this is a
+   whitelist problem, not an architecture problem.
+7. **No binary output path.** Every chat provider writes UTF-8 via `fs::write`,
+   so text formats are unlimited but binary ones (`.mid`, `.epub`, `.docx`) are
+   unreachable without a converter step.
 
 ---
 
@@ -279,6 +308,115 @@ snippets: [house-style, no-gemini-images]
 
 The GUI shows the same trace as a provenance popover next to each resolved field.
 
+### 4.4 `types` — the open type registry
+
+**Design goal: hundreds of output types, most of them text formats written by a
+chat LLM.** The good news from the stock-take is that this is far closer than it
+looks, because `type` and `format` are already open strings and the chat write
+path is already format-agnostic.
+
+#### What already works today — no code change
+
+This produces a LaTeX file right now, at `0722c42`:
+
+```yaml
+schema: "0.4"
+id: paper-draft
+type: document              # any chat type
+service: anthropic          # pinning a chat provider is the load-bearing bit
+output:
+  formats: [{format: tex}]  # used verbatim as the extension
+  text_format: latex        # drives prep + FIM guidance
+```
+
+The same shape already yields `csv`, `ics`, `gcode`, `sql`, `dockerfile`, `rss`,
+`abc`, `musicxml`, `json-ld`, `typst`, `lilypond` — **the long tail is reachable
+today**, it is merely undiscoverable and requires pinning `service:` by hand.
+
+**SVG is fully supported, with a shipped demo** (`demos/svg/sample-icon.media.prompt`):
+`type: image` + `service: gemini-chat` + `format: svg` + `text_format: svg`,
+with a dedicated repair arm in `sanitize_chat_output` (`providers/mod.rs:377-395`)
+and `validate_svg` xmllint + LLM auto-repair (`validate.rs:29-113`). A second
+route renders SVG from `type: diagram` via `post_processing` (`output_format`
+defaults to `"svg"`, `pipeline.rs:409-412`).
+
+#### Modalities — the closed set (code)
+
+| modality | engine today | examples |
+|---|---|---|
+| `text` | chat provider → `sanitize_chat_output` → `fs::write` | svg, latex, csv, ics, gcode, sql, rss, abc, musicxml |
+| `media` | media API returns binary | image, video, music, voice, sfx |
+| `render` | `text`, then `post_processing.render` via `renderers::get_renderer` | mermaid→png, plantuml→svg, graphviz→svg |
+| `compose` | DAG (`depends_on`, `as`/`collapse`) | style-guide, react-page |
+
+Types are open; modalities are not. Four engines cover an unbounded type space.
+
+#### Registry entry (YAML — no rebuild per type)
+
+Follows the precedent already set by FIM's on-disk `solution/<text_format>.md`
+lookup (`src/fim.rs:125-128`).
+
+```yaml
+types:
+  gcode:
+    modality: text
+    extension: gcode
+    text_format: gcode
+    default_service: anthropic
+    system: "Emit only valid RS-274 G-code. Absolute coords. No commentary."
+    validate: []
+
+  midi:
+    modality: render        # text first, then convert
+    via: abc                # LLM writes ABC notation
+    renderer: abc2midi      # NEW renderer — see below
+    extension: mid
+```
+
+Builtin types ship in the package as `types.d/*.yaml`; user types live in
+`~/.config/media-tool/types.d/` and merge over them, so house and community
+types are added without touching the binary. A new type is ~8 lines of YAML and
+zero Rust.
+
+#### MIDI — corrected assessment
+
+MIDI is **not** reachable today (zero `midi`/`.mid` references in `src/`,
+`media-tool.yaml` or `docs/`; no provider emits binary MIDI; no renderer
+converts to it). But it does **not** need a "MIDI provider". An LLM writes ABC
+notation or MusicXML as *text* — which works today — and a converter turns it
+into `.mid`. That is exactly the pattern `mermaid` already uses (`mmdc`:
+text → png).
+
+So MIDI costs **one new renderer** (`abc2midi`, or `lilypond` which also gives
+`.pdf` and `.ly`), registered alongside the existing four in
+`renderers/mod.rs:22-30` with the same `is_available()` probe. That single
+renderer unlocks a family: abc→midi, musicxml→midi, lilypond→midi/pdf. FIM
+solution docs for `abc`, `lilypond`, `musicxml`, `vexflow` already exist in
+`skill/content-media-engine/references/fim/solution/`.
+
+#### The seven choke points
+
+Making the long tail work *ergonomically* — without pinning `service:`, with
+correct prep and eval — is a whitelist problem, not a rewrite. Each is small:
+
+| # | File:line | Problem | Fix |
+|---|---|---|---|
+| 1 | `schema.rs:356` | unknown type → `AssetType::Unknown` dead end | map to a generic text type, or let `is_chat_type()` consider `text_format` |
+| 2 | `providers/mod.rs:254-257` | **`Unknown` dispatches to a hardcoded Gemini _image_ model** | must be a chat ladder |
+| 3 | `pipeline.rs:1058-1071` | `_ => asset_type == Image` rejects unknown types as unsupported | accept text types |
+| 4 | `providers/mod.rs:242-252` | chat tier is one hardcoded `groq-chat` candidate for all qualities | add `chat_tiers` to `ProviderConfig` mirroring the existing `image_tiers` |
+| 5 | `pipeline.rs:626-645` | `effective_text_format` extension whitelist | registry-driven |
+| 6 | `prep.rs:55-96` | prep channel routing whitelist | registry-driven |
+| 7 | `eval.rs:360-412` | unknown extensions are "un-scorable", structural only | registry declares an eval hint |
+
+Choke point **2** is the worst: an unrecognised type silently tries to generate
+an *image*. Fixing 1–4 alone unlocks the generic long tail; 5–7 make it good.
+
+**Config extensibility caveat:** `provider_config.rs:24-46` exposes `image_tiers`
+only — the image ladder is swappable without a rebuild, but chat/audio/video
+ladders and the `service → impl` maps are compiled. New *providers* need a
+rebuild; new *types* (after the above) do not.
+
 ---
 
 ## 5. Application design
@@ -455,20 +593,28 @@ Add `source/media-tool` to `SUBDIRS` in `Portfolio/Utilities/Makefile` so
 
 ## 7. Open questions
 
-1. **SVG and MIDI are not media types today.** Both were named in the request.
-   `svg` is close to existing `image`/`diagram` handling and is cheap to add as
-   a first-class type. **`midi` has no provider and no renderer at all** — it
-   needs a generator decided before it can be more than a cascade key. The
-   cascade in §4.3 accepts `type:svg` and `type:midi` as selectors regardless,
-   so config can be written ahead of support, but generation will fail until
-   the types exist. *Which of these is actually wanted in v1?*
-2. **Linux toolkit** — GTK4 vs Qt. GTK4 is the lighter dependency; Qt has better
+1. **Which converters earn a renderer slot?** SVG already works (§4.4). MIDI
+   needs exactly one new renderer — `abc2midi` or `lilypond` — and `lilypond`
+   also buys `.pdf`/`.ly`. Beyond music: `pandoc` would unlock the entire
+   document family (docx, epub, odt) through one binary, and `latexmk` the PDF
+   family. Each renderer is a bounded addition with an `is_available()` probe.
+   *Which families matter first — music, documents, or both?*
+2. **How large is the shipped type registry?** The registry makes types cheap,
+   but someone still writes each entry's system prompt and validator. A
+   plausible v1 is ~40 curated types across text/markup/data/music/document
+   families, with the rest user-added. *Is 40 the right order of magnitude?*
+3. **Binary formats need a converter contract.** Chat providers write UTF-8
+   only. `.mid`, `.epub` and `.docx` are all reachable via `render` (text →
+   converter), but that means the registry's `via:` field is load-bearing and
+   needs a real spec. *Confirm the text-intermediate approach is acceptable
+   versus waiting for providers that emit binary directly.*
+4. **Linux toolkit** — GTK4 vs Qt. GTK4 is the lighter dependency; Qt has better
    Windows story if the two ever converge. Not urgent until platform two.
-3. **Cost tracking.** Attempts record duration; should they record spend? Every
+5. **Cost tracking.** Attempts record duration; should they record spend? Every
    provider reports it differently and some not at all.
-4. **Run store growth.** Generated media is large. Retention policy — cap by
+6. **Run store growth.** Generated media is large. Retention policy — cap by
    size, by age, or prune-on-demand?
-5. **Apple Developer ID** — does one exist for signing, or is that a
+7. **Apple Developer ID** — does one exist for signing, or is that a
    prerequisite to acquire?
 
 ---
@@ -477,16 +623,22 @@ Add `source/media-tool` to `SUBDIRS` in `Portfolio/Utilities/Makefile` so
 
 | Phase | Deliverable | Gate |
 |---|---|---|
-| **0** | `[lib]` target, config additions (`keys`, `snippets`, `preferences`), cascade resolver + `explain` subcommand | CLI honours cascade; `explain` correct; tests green |
+| **0a** | Type-system unblock: choke points 1-4 (§4.4) — `Unknown` → chat not image, config-driven `chat_tiers` | an unregistered text type generates without pinning `service:` |
+| **0b** | `[lib]` target, config additions (`keys`, `snippets`, `preferences`, `types`), cascade resolver + `explain` subcommand | CLI honours cascade; `explain` correct; tests green |
+| **0c** | Type registry + `types.d/`, choke points 5-7, first converter renderer (`abc2midi` or `lilypond`) | MIDI generates end-to-end from an ABC intermediate |
 | **1** | `media-tool-ffi` C ABI, `session`/Run store | FFI stable, round-trips from a Swift test harness |
 | **2** | macOS app: Library, Editor, Compose review, Settings | Keys work end-to-end; cascade visible |
 | **3** | macOS app: Generate, Results, Grade, Revise | Full loop on one real prompt, survives window close |
 | **4** | `make release-macos` + signing + notarization + CI | Installable `.dmg` on a clean machine |
 | **5** | Linux, then Windows | C ABI unchanged for one release first |
 
-Phase 0 ships value with **no GUI at all** — the cascade, snippets and `explain`
-make the CLI materially better on their own, and they de-risk everything above
-by settling the config contract before any UI depends on it.
+Phase 0 ships value with **no GUI at all**. The cascade, snippets, `explain`
+and the open type registry make the CLI materially better on their own, and they
+de-risk everything above by settling the config contract before any UI depends
+on it. Phase 0a in particular is the highest-value work in this document: four
+small edits turn an unrecognised type from "silently tries to generate an image"
+into "works", which is the difference between a dozen types and an open-ended
+long tail.
 
 ---
 
