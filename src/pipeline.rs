@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use crate::attachments::{load_attachments, validate_attachments};
@@ -192,7 +193,7 @@ pub async fn run_generation(
         if !prompt.payload.prompt.provider_options.is_empty() {
             tel::plan_detail(
                 "Options",
-                &format!("{:?}", prompt.payload.prompt.provider_options),
+                &format_provider_options(&prompt.payload.prompt.provider_options),
             );
         }
 
@@ -1332,13 +1333,14 @@ async fn run_legacy_variants(
         } else {
             (raw_text, prompt.payload.prompt.negative.clone())
         };
+        let gen = GenerationInputs::new(gen_text, gen_neg);
 
         let system_prompt = text_inference_system_prompt(svc, prompt, config.fim_enabled);
 
         let ok = generate_one(
             svc,
-            &gen_text,
-            gen_neg.as_deref(),
+            &gen.text,
+            gen.negative.as_deref(),
             system_prompt.as_deref(),
             &genai_path,
             &api_key,
@@ -1348,14 +1350,11 @@ async fn run_legacy_variants(
         .await?;
 
         if ok {
-            write_metadata(
+            write_variant_metadata(
                 &genai_path,
                 svc,
                 candidate.model,
-                &gen_text,
-                prompt.payload.prompt.negative.as_deref(),
-                None,
-                None,
+                &gen,
                 &prompt.payload.prompt.provider_options,
             );
             progress::attempt_completed(
@@ -1558,5 +1557,171 @@ fn build_options(model: &str, prompt: &ParsedPrompt, config: &PipelineConfig) ->
         verbose: config.verbose,
         duration_seconds: prompt.meta.duration,
         audio_kind: prompt.meta.audio_kind,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Generation-time inputs + output formatting helpers
+// ---------------------------------------------------------------------------
+
+/// The prompt text and negative prompt actually handed to the provider for one
+/// generation.
+///
+/// These can differ from the values declared in the `.media.prompt` file: when a
+/// prompt exceeds a provider's length limit the LLM prepper may return both a
+/// condensed text and a replacement negative. Carrying the two together lets the
+/// sidecar writer below see only what was sent, never the declared value it may
+/// have replaced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GenerationInputs {
+    text: String,
+    negative: Option<String>,
+}
+
+impl GenerationInputs {
+    fn new(text: String, negative: Option<String>) -> Self {
+        Self { text, negative }
+    }
+}
+
+/// Write the metadata sidecar for a generated variant.
+///
+/// Deliberately takes [`GenerationInputs`] rather than the parsed prompt so the
+/// recorded negative prompt is necessarily the one that was sent — recording the
+/// declared negative instead makes the asset non-reproducible from its own
+/// metadata. See `variant_sidecar_records_effective_negative`.
+fn write_variant_metadata(
+    genai_path: &std::path::Path,
+    service: &str,
+    model: &str,
+    gen: &GenerationInputs,
+    provider_options: &HashMap<String, serde_yaml::Value>,
+) {
+    write_metadata(
+        genai_path,
+        service,
+        model,
+        &gen.text,
+        gen.negative.as_deref(),
+        None,
+        None,
+        provider_options,
+    );
+}
+
+/// Render `provider_options` for the plan summary with deterministic key order.
+///
+/// `provider_options` is a `HashMap`, whose iteration order varies from run to
+/// run; byte-for-byte diffing of CLI output is a primary regression check on this
+/// codebase, so the keys are sorted at the emission site. `Debug` for a `BTreeMap`
+/// of references renders byte-identically to the `HashMap` form apart from the
+/// ordering, so the line's shape is unchanged.
+fn format_provider_options(options: &HashMap<String, serde_yaml::Value>) -> String {
+    let ordered: BTreeMap<&String, &serde_yaml::Value> = options.iter().collect();
+    format!("{:?}", ordered)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn opt(v: &str) -> serde_yaml::Value {
+        serde_yaml::Value::String(v.to_string())
+    }
+
+    fn scratch_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "media-tool-pipeline-{}-{}",
+            tag,
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Bug 1 regression: when the LLM prepper replaces the declared negative, the
+    /// sidecar must record the negative that was actually sent to the provider.
+    #[test]
+    fn variant_sidecar_records_effective_negative() {
+        let declared = "declared-negative-never-sent";
+        let effective = "effective-negative-actually-sent";
+        assert_ne!(declared, effective);
+
+        let gen = GenerationInputs::new(
+            "condensed prompt text".to_string(),
+            Some(effective.to_string()),
+        );
+
+        let dir = scratch_dir("sidecar");
+        let asset = dir.join("asset.png");
+        write_variant_metadata(&asset, "gemini", "some-model", &gen, &HashMap::new());
+
+        let sidecar = std::fs::read_to_string(asset.with_extension("metadata.yaml")).unwrap();
+        assert!(
+            sidecar.contains(effective),
+            "sidecar must record the negative that was sent: {sidecar}"
+        );
+        assert!(
+            !sidecar.contains(declared),
+            "sidecar must not record a negative that was never sent: {sidecar}"
+        );
+        assert!(sidecar.contains("condensed prompt text"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A generation that keeps the declared negative still records it.
+    #[test]
+    fn variant_sidecar_records_declared_negative_when_unchanged() {
+        let gen = GenerationInputs::new("text".to_string(), Some("declared".to_string()));
+        let dir = scratch_dir("sidecar-declared");
+        let asset = dir.join("asset.png");
+        write_variant_metadata(&asset, "gemini", "some-model", &gen, &HashMap::new());
+        let sidecar = std::fs::read_to_string(asset.with_extension("metadata.yaml")).unwrap();
+        assert!(sidecar.contains("declared"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Bug 2 regression: the `Options:` line must be byte-stable across renders of
+    /// the same input, whatever order the HashMap happens to iterate in.
+    #[test]
+    fn provider_options_line_is_deterministic() {
+        let keys = [
+            "zulu", "alpha", "mike", "bravo", "yankee", "charlie", "tango", "delta", "sierra",
+            "echo", "romeo", "foxtrot",
+        ];
+
+        let mut first: Option<String> = None;
+        for _ in 0..64 {
+            let map: HashMap<String, serde_yaml::Value> = keys
+                .iter()
+                .map(|k| (k.to_string(), opt(&format!("v-{k}"))))
+                .collect();
+            let rendered = format_provider_options(&map);
+            match &first {
+                None => first = Some(rendered),
+                Some(prev) => assert_eq!(prev, &rendered, "Options rendering must be stable"),
+            }
+        }
+
+        let rendered = first.unwrap();
+        let mut sorted = keys.to_vec();
+        sorted.sort_unstable();
+        let positions: Vec<usize> = sorted
+            .iter()
+            .map(|k| rendered.find(&format!("\"{k}\"")).unwrap())
+            .collect();
+        assert!(
+            positions.windows(2).all(|w| w[0] < w[1]),
+            "keys must be emitted in sorted order: {rendered}"
+        );
+    }
+
+    /// Shape guard: sorting must not change the rendering of the line otherwise.
+    #[test]
+    fn provider_options_line_shape_matches_debug_form() {
+        let mut map: HashMap<String, serde_yaml::Value> = HashMap::new();
+        map.insert("only".to_string(), opt("value"));
+        assert_eq!(format_provider_options(&map), format!("{map:?}"));
     }
 }
