@@ -363,7 +363,7 @@ pub fn api_key_env(service: &str) -> &'static str {
         "groq" | "groq-chat" => "GROQ_API_KEY",
         "openai-chat" => "OPENAI_API_KEY",
         "openrouter" | "openrouter-chat" => "OPENROUTER_API_KEY",
-        "zai" | "z.ai" => "XAI_API_KEY",
+        "zai" | "z.ai" => "ZAI_API_KEY",
         _ => "GEMINI_API_KEY",
     }
 }
@@ -493,7 +493,10 @@ pub fn default_model(service: &str) -> &'static str {
         "groq" | "groq-chat" => DEFAULT_CHAT_MODEL,
         "openai-chat" => "gpt-4.1",
         "openrouter" | "openrouter-chat" => "openai/gpt-4o-mini",
-        "zai" | "z.ai" => "grok-4.3",
+        // Pinned to tobor-kit's llm-inference catalog default for the "zai"
+        // provider (Portfolio/Libs/tobor-kit/web/src/components/llm-inference/catalog.ts),
+        // the only in-repo evidence of z.ai's current flagship chat model.
+        "zai" | "z.ai" => "glm-5.3-flash",
         _ => "default",
     }
 }
@@ -533,6 +536,54 @@ mod tests {
         assert!(get_chat_provider("openrouter").is_some());
         assert!(get_chat_provider("openrouter-chat").is_some());
         assert!(!is_stub_provider("openrouter"));
+    }
+
+    /// Pins the full service -> API-key-env mapping so a copy/paste or
+    /// cross-vendor mixup (e.g. routing a z.ai request through XAI_API_KEY,
+    /// see the "zai"/"z.ai" incident) fails the build instead of silently
+    /// misrouting a credential to the wrong provider.
+    #[test]
+    fn api_key_env_mapping_is_pinned() {
+        let expected: &[(&str, &str)] = &[
+            ("gemini", "GEMINI_API_KEY"),
+            ("veo", "GEMINI_API_KEY"),
+            ("suno", "SUNO_API_KEY"),
+            ("openai-tts", "OPENAI_API_KEY"),
+            ("elevenlabs", "ELEVENLABS_API_KEY"),
+            ("qwen-tts", "DASHSCOPE_API_KEY"),
+            ("qwen-image", "DASHSCOPE_API_KEY"),
+            ("wan-video", "DASHSCOPE_API_KEY"),
+            ("happyhorse", "DASHSCOPE_API_KEY"),
+            ("grok-video", "XAI_API_KEY"),
+            ("anthropic", "ANTHROPIC_API_KEY"),
+            ("gemini-chat", "GEMINI_API_KEY"),
+            ("groq", "GROQ_API_KEY"),
+            ("groq-chat", "GROQ_API_KEY"),
+            ("openai-chat", "OPENAI_API_KEY"),
+            ("openrouter", "OPENROUTER_API_KEY"),
+            ("openrouter-chat", "OPENROUTER_API_KEY"),
+            ("zai", "ZAI_API_KEY"),
+            ("z.ai", "ZAI_API_KEY"),
+        ];
+        for (service, env) in expected {
+            assert_eq!(
+                api_key_env(service),
+                *env,
+                "api_key_env(\"{service}\") should resolve to {env}"
+            );
+        }
+        // xAI and z.ai are different vendors — their env vars must never collide.
+        assert_ne!(api_key_env("grok-video"), api_key_env("zai"));
+        assert_ne!(api_key_env("grok-video"), api_key_env("z.ai"));
+    }
+
+    /// Pins the z.ai default model to tobor-kit's llm-inference catalog
+    /// value, so a future edit doesn't silently drift back to an xAI model
+    /// name (as `grok-4.3` did) or to some other unpinned guess.
+    #[test]
+    fn zai_default_model_matches_tobor_kit_catalog() {
+        assert_eq!(default_model("zai"), "glm-5.3-flash");
+        assert_eq!(default_model("z.ai"), "glm-5.3-flash");
     }
 
     #[test]

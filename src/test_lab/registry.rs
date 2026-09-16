@@ -669,7 +669,7 @@ const CHAT_API_TABLE: &[ChatRow] = &[
     },
     ChatRow {
         slug: "z.ai",
-        description: "xAI Grok chat (z.ai alias)",
+        description: "z.ai (Zhipu GLM) chat completions",
     },
 ];
 
