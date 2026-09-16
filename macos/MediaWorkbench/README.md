@@ -1,14 +1,20 @@
 # Media Workbench (macOS)
 
-First vertical slice of the media-tool desktop app: a SwiftUI shell plus a
-working **Settings → Keys** screen that reads and writes the real
-`~/.config/media-tool/media-tool.yaml`. No Rust FFI exists yet — Library and
-Runs are honest placeholders naming what blocks them.
-
-The point of this slice is to prove the [tobor-kit](../../../../Libs/tobor-kit)
-integration end-to-end before any FFI work starts.
+First vertical slices of the media-tool desktop app: a SwiftUI shell, a working
+**Settings → Keys** screen that reads and writes the real
+`~/.config/media-tool/media-tool.yaml`, and a **narrow UniFFI bridge** onto the
+Rust library (`MediaToolBridge`). Library and Runs are still placeholders.
 
 ## Build & run
+
+The Swift package links a Rust staticlib, so the Rust side must be built first.
+From the **repo root**:
+
+```bash
+make ffi        # cargo build --release + regenerate the Swift bindings
+```
+
+Then, from this directory:
 
 ```bash
 swift build
@@ -33,10 +39,67 @@ TOBOR_KIT_PATH=/abs/path/to/Portfolio/Libs/tobor-kit swift build
 | `Sources/MediaWorkbenchKit/Catalog/` | media-tool's 16-provider catalog + modality grouping |
 | `Sources/MediaWorkbenchKit/Config/` | `media-tool.yaml` read/write, `LLMInferenceConfigStoring` adapter |
 | `Sources/MediaWorkbenchKit/Views/` | Root split view, Keys settings, placeholders |
+| `Sources/MediaToolBridge/` | **Generated** UniFFI Swift bindings — do not hand-edit |
+| `Sources/media_toolFFI/` | **Generated** C header + `module.modulemap` for the staticlib |
 | `Tests/MediaWorkbenchKitTests/` | YAML round-trip, catalog, store, key-default tests |
+| `Tests/MediaToolBridgeTests/` | Progress-path proof: `listPrompts`/`parsePrompt`/`dryRun` against a temp fixture |
 
 Logic lives in the `MediaWorkbenchKit` library so it is testable; the executable
 target is a thin `@main` shell.
+
+## The Rust bridge (`MediaToolBridge`)
+
+Phase 1a exposes three calls and nothing else. Real generation and cancellation
+are the next slice.
+
+```swift
+func parsePrompt(path: String) throws -> PromptSummary
+func listPrompts(dir: String, recursive: Bool) throws -> [PromptSummary]
+func dryRun(paths: [String], observer: ProgressObserver) throws -> RunSummary
+```
+
+`dryRun` streams `ProgressEvent` — a Swift enum with associated values, never a
+string or a JSON blob — to a `ProgressObserver` you implement:
+
+```swift
+final class Recorder: ProgressObserver, @unchecked Sendable {
+    func onEvent(event: ProgressEvent) {
+        if case let .planItem(promptId, assetType, service, model, outputPath) = event {
+            …
+        }
+    }
+}
+```
+
+Rust scopes its `tracing` subscriber to the single `dryRun` call (thread-local
+dispatcher + current-thread runtime), so nothing is installed globally and an
+observer stops hearing anything the moment its call returns. See
+`src/ffi.rs` module docs.
+
+### Regenerating the bindings
+
+`Sources/MediaToolBridge/media_tool.swift`, `Sources/media_toolFFI/media_toolFFI.h`
+and `Sources/media_toolFFI/module.modulemap` are **generated and committed**.
+After any change to `src/ffi.rs`, from the repo root:
+
+```bash
+make ffi
+```
+
+which is:
+
+```bash
+cargo build --release
+cargo run --release --bin uniffi-bindgen -- generate \
+    --library target/release/libmedia_tool.dylib \
+    --language swift --no-format \
+    --out-dir target/uniffi-swift
+# then copy the three files into place (see the Makefile `ffi` target)
+```
+
+`Package.swift` finds `libmedia_tool.a` relative to its own location
+(`../../target/release`); `MEDIA_TOOL_LIB_DIR` overrides that for a debug build
+or a CI artifact, the same way `TOBOR_KIT_PATH` overrides the tobor-kit path.
 
 ## Config contract
 

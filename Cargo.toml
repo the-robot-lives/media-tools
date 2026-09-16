@@ -7,10 +7,26 @@ description = "Generate media assets from .media.prompt YAML files"
 [lib]
 name = "media_tool"
 path = "src/lib.rs"
+# `lib` keeps the CLI binary and the test harness linking the rlib exactly as before;
+# `cdylib`/`staticlib` exist for the UniFFI bridge (see `src/ffi.rs`). Swift links the
+# staticlib, `uniffi-bindgen --library` reads the cdylib.
+crate-type = ["lib", "cdylib", "staticlib"]
 
 [[bin]]
 name = "generate-media-prompt"
 path = "src/main.rs"
+
+# Binding generator. Not shipped, and feature-gated so a plain `cargo build` never drags
+# `uniffi`'s generator into the CLI binary. Kept in-tree so the generator version can never
+# drift from the `uniffi` runtime version compiled into the library. Run it via `make ffi`.
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+default = []
+bindgen = ["uniffi/cli"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
@@ -34,6 +50,8 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["registry", "std"] }
+uniffi = { version = "0.32" }
+thiserror = "1"
 
 [dev-dependencies]
 insta = "1"

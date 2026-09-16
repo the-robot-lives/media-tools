@@ -18,6 +18,7 @@
 pub mod attachments;
 pub mod dag;
 pub mod eval;
+pub mod ffi;
 pub mod fim;
 pub mod orchestrator;
 pub mod output;
@@ -41,3 +42,7 @@ pub use orchestrator::{
 };
 pub use pipeline::PipelineConfig;
 pub use schema::{parse_prompt_file, ParsedPrompt, Quality};
+
+// UniFFI scaffolding for the `ffi` module. The namespace is `media_tool` (the library name),
+// not the package name, so the generated Swift module matches what everything else calls this.
+uniffi::setup_scaffolding!("media_tool");
