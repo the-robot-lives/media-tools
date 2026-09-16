@@ -127,7 +127,8 @@ Existing keys: `defaults`, `image_tiers`, `max_prompt_chars`, `refine_model`,
 │  + tobor-kit Swift pods                                      │
 └───────────────┬─────────────────┬──────────────┬─────────────┘
                 │                 │              │
-                └────────── C ABI (media-tool-ffi) ────────────┘
+                └──────────── UniFFI bindings ─────────────────┘
+                   (Linux/GTK4 needs none — calls the crate directly)
                                   │
 ┌─────────────────────────────────▼───────────────────────────┐
 │  generate-media-prompt  (Rust, existing crate → + lib target)│
@@ -152,7 +153,8 @@ a 3× rewrite — and it is the only reason the native-per-OS choice is tractabl
 | Change | Why |
 |---|---|
 | Add `[lib]` target alongside the existing `[[bin]]` | Today it is bin-only |
-| New crate `media-tool-ffi` → `staticlib` + `cdylib` | C ABI for Swift/GTK/WinUI |
+| UniFFI annotations (`#[uniffi::export]`, `Record`, `Enum`, `Error`) | generates Swift bindings; same annotations later emit C# for WinUI |
+| Swift 6 / macOS 14 target floor | set by tobor-kit's `Package.swift` |
 | Extract `main.rs` orchestration into library functions | CLI becomes a thin caller, same as the GUI |
 | Long-running ops behind a handle + poll/callback API | Generation takes minutes; UI must stay live |
 | `snippets` module | §4.2 |
@@ -163,12 +165,39 @@ a 3× rewrite — and it is the only reason the native-per-OS choice is tractabl
 so cross-compilation is unusually clean. `[profile.release]` already sets
 `strip = true`, `lto = true`.
 
+**Binding layer: UniFFI** (mozilla/uniffi-rs, v0.32.x, production-hardened in
+Firefox). Chosen over a hand-rolled C ABI, which an earlier draft of this
+document specified, on four grounds:
+
+| requirement | UniFFI |
+|---|---|
+| async | native: `#[uniffi::export(async_runtime = "tokio")]`, and the core already runs tokio `full` — a direct match, not an adapter. Swift call site is plain `await`. |
+| progress mid-operation | callback interfaces let Rust invoke Swift methods during a run — this is the progress channel |
+| cancellation | 0.32 wires Swift `Task` cancellation through to `rust_future_cancel`; `foreign_future_dropped_callback` fires on drop. Real bidirectional cancellation, not a polling flag. |
+| rich types | `Result<T, E>` → Swift `throws`; structs/enums via `derive(uniffi::Record / Enum)` |
+
+The decisive argument against hand-rolling is not callback plumbing — that is
+tractable — but **ABI drift**: hand-marshalled structs and enums have no
+compiler-checked contract between Rust and Swift, and become a steady source of
+mismatch bugs as the schema grows. UniFFI makes the contract checked.
+
+**Platform dividend:** Linux needs **no binding layer at all** — GTK4 via
+`gtk4-rs` is Rust-native and calls the crate in-process. Windows/WinUI can use
+UniFFI's C# backend generated from the same annotations. So the binding work is
+paid once, for macOS, and the other two platforms inherit or bypass it.
+
+**Escape hatch:** if UniFFI's callback-interface completion model proves too
+rigid for high-frequency streaming progress (the known sharp edge —
+mozilla/uniffi-rs#2633), fall back to a hand-rolled C ABI for the progress
+channel specifically. Prototype the progress path first to find out early.
+
 ### 3.2 Platform sequencing
 
 macOS ships first (it is the platform actually asked for, and tobor-kit already
 has Swift mirrors). Linux and Windows follow once the FFI surface has stopped
-moving. **Do not start platform two until the macOS app has shipped and the C ABI
-has been stable for a release** — otherwise three UIs chase a moving boundary.
+moving. **Do not start platform two until the macOS app has shipped and the UniFFI
+interface has been stable for a release** — otherwise three UIs chase a moving
+boundary.
 
 ---
 
@@ -207,6 +236,12 @@ call time and never logged. Consequences:
   commit or sync.
 - `{keychain:}` maps to macOS Keychain / libsecret / Windows Credential Manager.
   This is what the GUI's key form writes when the user types a key directly.
+  **Integration gap:** tobor-kit's `LLMKeySpec` (`LLMInferenceConfig.swift`) has
+  only `literal` and `.environment` cases, so its `Codable` config cannot
+  round-trip a keychain spec. Either add a `.keychain` case upstream to the kit
+  (preferred — it is a general need, not ours alone) or keep keychain
+  indirection entirely in our `LLMInferenceConfigStoring` implementation and
+  hand the view a resolved `.environment`-shaped spec. Decide before §8 phase 2.
 - `{literal:}` is supported for CI and headless use but the GUI **never writes
   it** and warns when it reads one.
 - Redaction is enforced in the core, not the UI, so the CLI benefits too.
@@ -501,12 +536,29 @@ command palette in v1 — this is a tool used deliberately, not at speed.
    is the loop `src/refine.rs` already runs, given memory and a UI.
 
 8. **Settings** — three tabs:
-   - **Keys**: one `tobor-llm-inference` instance per provider. The kit
-     component is single-provider by design, so the multi-provider matrix is
-     composition, not a kit change. The component takes a `catalog` prop, so we
-     pass a **media-provider catalog** (our 16) instead of the default 9-entry
-     chat catalog — no upstream modification required. Its `test-complete`
-     event drives the per-provider status badge.
+   - **Keys**: one `LLMInferenceSettingsView` per provider. The kit component is
+     single-provider by design, so the multi-provider matrix is composition, not
+     a kit change. Verified Swift contract:
+
+     ```swift
+     LLMInferenceSettingsView(
+       config: Binding<LLMInferenceConfig>,
+       catalog: [LLMProvider] = LLMProvider.catalog,   // injectable ✓
+       transport: any HTTPTransporting = URLSessionTransport(),
+       environment: [String: String] = ProcessInfo.processInfo.environment)
+     ```
+
+     `catalog:` is a plain default argument, so we pass a **media-provider
+     catalog** (our 16) in place of the built-in 9-entry chat catalog — no
+     upstream change needed. The view's only binding is `config`; **the host
+     owns persistence** and the view never saves, so the app loads on appear and
+     writes on change.
+
+     Consumption: SwiftPM by local path — `.package(path: "../../Libs/tobor-kit")`,
+     product `ToborKitUI` (package name is `ToborKit` though the directory is
+     `tobor-kit`). **Do not pin the `v0.1.0` tag**: it predates most of the Swift
+     work. Swift tools 6.0, `.swiftLanguageMode(.v6)`, **macOS 14.0 minimum** —
+     which sets the app's deployment target.
    - **Preferences**: the §4.3 cascade, as an ordered rule list with a live
      "resolve a sample prompt" pane. Editing rules without seeing their effect
      is how people misconfigure cascades.
@@ -657,7 +709,7 @@ Add `source/media-tool` to `SUBDIRS` in `Portfolio/Utilities/Makefile` so
 | **0a** | Type-system unblock: choke points 1-4 (§4.4) — `Unknown` → chat not image, config-driven `chat_tiers` | an unregistered text type generates without pinning `service:` |
 | **0b** | `[lib]` target, config additions (`keys`, `snippets`, `preferences`, `types`), cascade resolver + `explain` subcommand | CLI honours cascade; `explain` correct; tests green |
 | **0c** | Type registry + `types.d/`, choke points 5-7, first converter renderer (`abc2midi` or `lilypond`) | MIDI generates end-to-end from an ABC intermediate |
-| **1** | `media-tool-ffi` C ABI, `session`/Run store | FFI stable, round-trips from a Swift test harness |
+| **1** | UniFFI annotations + generated Swift bindings, `session`/Run store | a Swift test harness round-trips a run, streams progress, and cancels mid-generation |
 | **2** | macOS app: Library, Editor, Compose review, Settings | Keys work end-to-end; cascade visible |
 | **3** | macOS app: Generate, Results, Grade, Revise | Full loop on one real prompt, survives window close |
 | **4** | `make release-macos` + signing + notarization + CI | Installable `.dmg` on a clean machine |
