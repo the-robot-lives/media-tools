@@ -191,6 +191,36 @@ rigid for high-frequency streaming progress (the known sharp edge —
 mozilla/uniffi-rs#2633), fall back to a hand-rolled C ABI for the progress
 channel specifically. Prototype the progress path first to find out early.
 
+### 3.3 The progress problem (found during 0b)
+
+PR #12 extracted orchestration cleanly, but stopped at a real boundary worth
+recording rather than glossing: **`pipeline`, `prep`, `eval`, `refine` and the
+provider modules still call `ui::*` directly at roughly 170 sites.**
+
+Consequence: a GUI can link the crate and invoke generation today, but it cannot
+*observe* it. Progress exists only as stderr text. §3's binding table promises
+progress via UniFFI callback interfaces — and there is currently nothing
+structured to call back with. That makes this a **prerequisite for phase 1**,
+not a nice-to-have, because a generation run takes minutes and a UI with no
+progress and no cancel is not shippable.
+
+Three ways to close it:
+
+| option | shape | cost |
+|---|---|---|
+| thread a sink | pass `&dyn ProgressSink` through the call graph | touches ~170 sites and every signature between them |
+| global/thread-local sink | `ui::*` dispatches to an installed sink | small diff, but hidden global state and awkward across tokio tasks |
+| **`tracing`** ✅ | emitters publish structured events; consumers subscribe | small diff at call sites, no signature churn, structured fields, mature ecosystem |
+
+**Recommended: `tracing`.** The CLI installs a subscriber that formats to the
+terminal exactly as `ui::*` does now (preserving today's output); the GUI
+installs one that forwards events across the UniFFI callback boundary. Emitters
+stop knowing who is listening, which is the actual design goal — and it avoids
+rewriting 170 call sites into parameter-passing.
+
+Cancellation is separate and already tractable: a `tokio` `CancellationToken`
+checked at pipeline boundaries, wired to UniFFI's `rust_future_cancel` (§3).
+
 ### 3.2 Platform sequencing
 
 macOS ships first (it is the platform actually asked for, and tobor-kit already
@@ -732,7 +762,9 @@ Add `source/media-tool` to `SUBDIRS` in `Portfolio/Utilities/Makefile` so
 | Phase | Deliverable | Gate |
 |---|---|---|
 | **0a** ✅ | Type-system unblock (§4.4) — `Unknown` → chat not image, config-driven `chat_tiers` | **DONE, PR #9** — 40 tests pass (was 36); `gcode` routes to chat |
-| **0b** | `[lib]` target, config additions (`keys`, `snippets`, `preferences`, `types`), cascade resolver + `explain` subcommand | CLI honours cascade; `explain` correct; tests green |
+| **0b** ✅ | `[lib]` target (`media_tool`) + orchestration extracted to `src/orchestrator.rs` | **DONE, PR #12** — main.rs 624→342 lines, 40 tests, dry-run output verified byte-identical against base |
+| **0b2** | config additions (`keys`, `snippets`, `preferences`, `types`), cascade resolver + `explain` subcommand | CLI honours cascade; `explain` correct |
+| **0d** | **progress sink** — see §3.3; prerequisite for phase 1 | pipeline emits structured progress with no terminal assumption |
 | **0c** | Type registry + `types.d/`, choke points 5-7, first converter renderer (`abc2midi` or `lilypond`) | MIDI generates end-to-end from an ABC intermediate |
 | **1** | UniFFI annotations + generated Swift bindings, `session`/Run store | a Swift test harness round-trips a run, streams progress, and cancels mid-generation |
 | **2** | macOS app: Library, Editor, Compose review, Settings | Keys work end-to-end; cascade visible |
