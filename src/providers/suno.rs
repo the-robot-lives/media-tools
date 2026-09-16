@@ -6,7 +6,8 @@ use serde_json::json;
 use crate::attachments::LoadedAttachment;
 use crate::providers::{GenerationOptions, MediaProvider};
 use crate::schema::AudioKind;
-use crate::ui;
+use crate::telemetry as tel;
+use crate::telemetry::progress;
 
 const DEFAULT_MODEL: &str = "V6";
 const POLL_INTERVAL_SECS: u64 = 10;
@@ -214,47 +215,52 @@ impl MediaProvider for SunoProvider {
         let is_sfx = options.audio_kind == AudioKind::Sfx;
 
         if options.verbose {
-            ui::verbose(&format!("POST {}", url));
+            tel::verbose(&format!("POST {}", url));
             let preview: String = prompt_text.chars().take(120).collect();
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "Prompt: {}{}",
                 preview,
                 if prompt_text.len() > 120 { "..." } else { "" }
             ));
             if is_sfx {
-                ui::verbose(&format!("Model: {} (sound generation)", model));
+                tel::verbose(&format!("Model: {} (sound generation)", model));
             } else {
-                ui::verbose(&format!("Model: {}", model));
+                tel::verbose(&format!("Model: {}", model));
             }
         }
 
+        progress::provider_request("suno", &options.model, &url, 1);
         let client = reqwest::Client::new();
 
         // Submit generation request (single 429 retry for batch runs)
         let mut response = match post_json(&client, &url, api_key, &body).await {
             Ok(r) => r,
             Err(e) => {
-                ui::fail_msg(&format!("Network error submitting to Suno: {}", e));
+                progress::provider_response("suno", 0, false, 1);
+                tel::fail_msg(&format!("Network error submitting to Suno: {}", e));
                 return Ok(false);
             }
         };
 
         if let Some(wait) = retry_after_rate_limit(response.status().as_u16(), 0) {
-            ui::info(&format!(
+            tel::info(&format!(
                 "Suno rate limited (429) — waiting {}s before a single retry",
                 wait
             ));
+            progress::provider_retry("suno", 2, wait * 1000, "rate limited (429) on generate");
             tokio::time::sleep(Duration::from_secs(wait)).await;
             response = match post_json(&client, &url, api_key, &body).await {
                 Ok(r) => r,
                 Err(e) => {
-                    ui::fail_msg(&format!("Network error resubmitting to Suno: {}", e));
+                    progress::provider_response("suno", 0, false, 2);
+                    tel::fail_msg(&format!("Network error resubmitting to Suno: {}", e));
                     return Ok(false);
                 }
             };
         }
 
         let status = response.status();
+        progress::provider_response("suno", status.as_u16(), status.is_success(), 1);
         if status.as_u16() == 401 || status.as_u16() == 403 {
             let body_text = response.text().await.unwrap_or_default();
             color_eyre::eyre::bail!(
@@ -265,7 +271,7 @@ impl MediaProvider for SunoProvider {
         }
         if !status.is_success() {
             let body_text = response.text().await.unwrap_or_default();
-            ui::fail_msg(&format!(
+            tel::fail_msg(&format!(
                 "Suno API error ({}): {}",
                 status.as_u16(),
                 &body_text[..body_text.len().min(300)]
@@ -279,9 +285,9 @@ impl MediaProvider for SunoProvider {
             .ok_or_else(|| color_eyre::eyre::eyre!("No taskId in Suno response: {}", result))?;
 
         if options.verbose {
-            ui::verbose(&format!("Task submitted: {}", task_id));
+            tel::verbose(&format!("Task submitted: {}", task_id));
         }
-        ui::info(&format!("Suno task {} — polling for completion", task_id));
+        tel::info(&format!("Suno task {} — polling for completion", task_id));
 
         // Poll for completion
         let poll_url = format!(
@@ -292,6 +298,12 @@ impl MediaProvider for SunoProvider {
         let mut poll_429_retried = false;
         for attempt in 1..=MAX_POLL_ATTEMPTS {
             tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_SECS)).await;
+            progress::provider_retry(
+                "suno",
+                attempt as usize,
+                POLL_INTERVAL_SECS * 1000,
+                "polling for completion",
+            );
 
             let poll_get = || async {
                 client
@@ -306,7 +318,7 @@ impl MediaProvider for SunoProvider {
                 Ok(r) => r,
                 Err(e) => {
                     if options.verbose {
-                        ui::verbose(&format!("Poll attempt {} failed: {}", attempt, e));
+                        tel::verbose(&format!("Poll attempt {} failed: {}", attempt, e));
                     }
                     continue;
                 }
@@ -316,16 +328,22 @@ impl MediaProvider for SunoProvider {
                 retry_after_rate_limit(poll_response.status().as_u16(), poll_429_retried as u32)
             {
                 poll_429_retried = true;
-                ui::info(&format!(
+                tel::info(&format!(
                     "Suno rate limited (429) on record-info — waiting {}s before a single retry",
                     wait
                 ));
+                progress::provider_retry(
+                    "suno",
+                    attempt as usize,
+                    wait * 1000,
+                    "rate limited (429) on record-info",
+                );
                 tokio::time::sleep(Duration::from_secs(wait)).await;
                 poll_response = match poll_get().await {
                     Ok(r) => r,
                     Err(e) => {
                         if options.verbose {
-                            ui::verbose(&format!("Poll retry failed: {}", e));
+                            tel::verbose(&format!("Poll retry failed: {}", e));
                         }
                         continue;
                     }
@@ -334,7 +352,7 @@ impl MediaProvider for SunoProvider {
 
             if !poll_response.status().is_success() {
                 if options.verbose {
-                    ui::verbose(&format!(
+                    tel::verbose(&format!(
                         "Poll attempt {} returned {}",
                         attempt,
                         poll_response.status()
@@ -352,7 +370,7 @@ impl MediaProvider for SunoProvider {
                         let preview =
                             serde_json::to_string_pretty(&poll_result).unwrap_or_default();
                         let truncated: String = preview.chars().take(1000).collect();
-                        ui::verbose(&format!("Suno SUCCESS response: {}", truncated));
+                        tel::verbose(&format!("Suno SUCCESS response: {}", truncated));
                     }
 
                     // Try multiple known response shapes
@@ -368,19 +386,19 @@ impl MediaProvider for SunoProvider {
                                 .or_else(|| first["audio_url"].as_str())
                                 .unwrap_or("");
                             if audio_url.is_empty() {
-                                ui::fail_msg("Suno returned SUCCESS but no audio_url");
+                                tel::fail_msg("Suno returned SUCCESS but no audio_url");
                                 return Ok(false);
                             }
 
                             if options.verbose {
                                 if let Some(title) = first["title"].as_str() {
-                                    ui::verbose(&format!("Title: {}", title));
+                                    tel::verbose(&format!("Title: {}", title));
                                 }
                                 if let Some(dur) = first["duration"].as_f64() {
-                                    ui::verbose(&format!("Duration: {:.1}s", dur));
+                                    tel::verbose(&format!("Duration: {:.1}s", dur));
                                 }
                                 if let Some(tags) = first["tags"].as_str() {
-                                    ui::verbose(&format!("Tags: {}", tags));
+                                    tel::verbose(&format!("Tags: {}", tags));
                                 }
                             }
 
@@ -390,21 +408,21 @@ impl MediaProvider for SunoProvider {
                         }
                     }
 
-                    ui::fail_msg("Suno returned SUCCESS but no tracks in response");
+                    tel::fail_msg("Suno returned SUCCESS but no tracks in response");
                     return Ok(false);
                 }
                 "FAILED" => {
-                    ui::fail_msg(&format!("Suno generation failed for task {}", task_id));
+                    tel::fail_msg(&format!("Suno generation failed for task {}", task_id));
                     if options.verbose {
                         let preview =
                             serde_json::to_string_pretty(&poll_result).unwrap_or_default();
-                        ui::verbose(&preview[..preview.len().min(500)]);
+                        tel::verbose(&preview[..preview.len().min(500)]);
                     }
                     return Ok(false);
                 }
                 "PENDING" | "GENERATING" | "TEXT_SUCCESS" | "FIRST_SUCCESS" => {
                     if options.verbose && attempt % 3 == 0 {
-                        ui::verbose(&format!(
+                        tel::verbose(&format!(
                             "Still {} (poll {}/{})",
                             status_str, attempt, MAX_POLL_ATTEMPTS
                         ));
@@ -412,13 +430,13 @@ impl MediaProvider for SunoProvider {
                 }
                 _ => {
                     if options.verbose {
-                        ui::verbose(&format!("Unknown status: {}", status_str));
+                        tel::verbose(&format!("Unknown status: {}", status_str));
                     }
                 }
             }
         }
 
-        ui::fail_msg(&format!(
+        tel::fail_msg(&format!(
             "Suno task {} timed out after {} polls",
             task_id, MAX_POLL_ATTEMPTS
         ));
@@ -439,7 +457,7 @@ impl SunoProvider {
         verbose: bool,
     ) -> color_eyre::Result<bool> {
         if verbose {
-            ui::verbose(&format!("Downloading: {}", url));
+            tel::verbose(&format!("Downloading: {}", url));
         }
 
         let resp = client
@@ -451,7 +469,7 @@ impl SunoProvider {
         match resp {
             Ok(response) => {
                 if !response.status().is_success() {
-                    ui::fail_msg(&format!("Download failed: HTTP {}", response.status()));
+                    tel::fail_msg(&format!("Download failed: HTTP {}", response.status()));
                     return Ok(false);
                 }
 
@@ -463,7 +481,7 @@ impl SunoProvider {
                 Ok(true)
             }
             Err(e) => {
-                ui::fail_msg(&format!("Download error: {}", e));
+                tel::fail_msg(&format!("Download error: {}", e));
                 Ok(false)
             }
         }

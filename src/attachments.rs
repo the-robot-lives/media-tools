@@ -52,9 +52,7 @@ pub fn load_attachments(prompt: &ParsedPrompt) -> color_eyre::Result<Vec<LoadedA
 
     for att in &prompt.payload.attachments {
         if att.path.is_empty() {
-            eprintln!(
-                "  \x1b[1;33m\u{26a0}\u{fe0f}  Attachment with no path \u{2014} skipping\x1b[0m"
-            );
+            crate::telemetry::warn_msg("Attachment with no path \u{2014} skipping");
             continue;
         }
 
@@ -95,10 +93,7 @@ pub fn validate_attachments(prompt: &ParsedPrompt) -> bool {
         }
         let abs_path = prompt_dir.join(&att.path);
         if !abs_path.exists() {
-            eprintln!(
-                "  \x1b[0;31m\u{274c} Attachment not found: {}\x1b[0m",
-                abs_path.display()
-            );
+            crate::telemetry::fail_msg(&format!("Attachment not found: {}", abs_path.display()));
             valid = false;
         }
     }

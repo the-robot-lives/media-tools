@@ -65,7 +65,7 @@ impl Renderer for PuppeteerRenderer {
             Ok(true)
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("puppeteer render failed: {}", stderr);
+            crate::telemetry::raw(&format!("puppeteer render failed: {}", stderr));
             Ok(false)
         }
     }

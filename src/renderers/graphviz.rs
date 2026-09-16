@@ -42,7 +42,7 @@ impl Renderer for GraphvizRenderer {
             Ok(true)
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("{} failed: {}", layout, stderr);
+            crate::telemetry::raw(&format!("{} failed: {}", layout, stderr));
             Ok(false)
         }
     }

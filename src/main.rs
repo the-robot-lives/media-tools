@@ -3,6 +3,12 @@
 //! This binary owns only CLI concerns: clap parsing, terminal rendering (dialoguer prompts,
 //! `ui::*` status lines), subprocess launching and process exit codes. All orchestration lives
 //! in the `media_tool` library so other front-ends can drive it without a terminal.
+//!
+//! The library reports progress as `tracing` events rather than printing. `main` installs
+//! [`term_layer::TermLayer`], which renders those events through `ui::*` exactly as the
+//! library used to print them itself.
+
+mod term_layer;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -115,7 +121,15 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-    color_eyre::install()?;
+    // `capture_span_trace_by_default(false)`: installing a tracing subscriber makes color-eyre
+    // try to capture a SpanTrace, and without a `tracing-error` ErrorLayer it prints a
+    // "SpanTrace capture is Unsupported" warning on every error report. Span traces were never
+    // captured before the subscriber existed, so turning the attempt off keeps error output
+    // exactly as it was.
+    color_eyre::config::HookBuilder::default()
+        .capture_span_trace_by_default(false)
+        .install()?;
+    install_terminal_subscriber();
     let cli = Cli::parse();
 
     // Load .envrc.k8.dc for API keys (GEMINI, SUNO, OPENAI, ELEVENLABS, DASHSCOPE)
@@ -215,6 +229,18 @@ async fn main() -> color_eyre::Result<()> {
     orchestrator::run_generation(prompts, &config).await?;
 
     Ok(())
+}
+
+/// Route the library's telemetry events to the terminal.
+///
+/// Installed before anything can emit, so no status line is lost.
+fn install_terminal_subscriber() {
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    let _ = tracing_subscriber::registry()
+        .with(term_layer::TermLayer)
+        .try_init();
 }
 
 fn report_input_issues(issues: &[InputIssue]) {

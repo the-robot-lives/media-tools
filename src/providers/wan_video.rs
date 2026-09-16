@@ -7,7 +7,8 @@ use crate::attachments::LoadedAttachment;
 use crate::providers::dashscope;
 use crate::providers::qwen_image::download_to;
 use crate::providers::{GenerationOptions, MediaProvider};
-use crate::ui;
+use crate::telemetry as tel;
+use crate::telemetry::progress;
 
 const DEFAULT_MODEL: &str = "wan2.7-t2v";
 const POLL_INTERVAL_SECS: u64 = 10;
@@ -72,13 +73,14 @@ impl MediaProvider for WanVideoProvider {
 
         let api_url = dashscope::video_synthesis_url(options);
         if options.verbose {
-            ui::verbose(&format!("POST {}", api_url));
-            ui::verbose(&format!(
+            tel::verbose(&format!("POST {}", api_url));
+            tel::verbose(&format!(
                 "Model: {}, duration: {}s, ratio: {}",
                 model, duration, ratio
             ));
         }
 
+        progress::provider_request("wan-video", &options.model, &api_url, 1);
         let client = reqwest::Client::new();
         let resp = client
             .post(&api_url)
@@ -93,12 +95,14 @@ impl MediaProvider for WanVideoProvider {
         let response = match resp {
             Ok(r) => r,
             Err(e) => {
-                ui::fail_msg(&format!("Network error submitting Wan video: {}", e));
+                progress::provider_response("wan-video", 0, false, 1);
+                tel::fail_msg(&format!("Network error submitting Wan video: {}", e));
                 return Ok(false);
             }
         };
 
         let status = response.status();
+        progress::provider_response("wan-video", status.as_u16(), status.is_success(), 1);
         if status.as_u16() == 401 || status.as_u16() == 403 {
             let body_text = response.text().await.unwrap_or_default();
             color_eyre::eyre::bail!(
@@ -109,7 +113,7 @@ impl MediaProvider for WanVideoProvider {
         }
         if !status.is_success() {
             let body_text = response.text().await.unwrap_or_default();
-            ui::fail_msg(&format!(
+            tel::fail_msg(&format!(
                 "Wan video error ({}): {}",
                 status.as_u16(),
                 &body_text[..body_text.len().min(300)]
@@ -125,11 +129,17 @@ impl MediaProvider for WanVideoProvider {
                 color_eyre::eyre::eyre!("No task_id in Wan video response: {}", result)
             })?;
 
-        ui::info(&format!("Wan task {} — polling for completion", task_id));
+        tel::info(&format!("Wan task {} — polling for completion", task_id));
         let poll_url = dashscope::task_url(options, task_id);
 
-        for _ in 1..=MAX_POLL_ATTEMPTS {
+        for poll_attempt in 1..=MAX_POLL_ATTEMPTS {
             tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_SECS)).await;
+            progress::provider_retry(
+                "wan-video",
+                poll_attempt as usize,
+                POLL_INTERVAL_SECS * 1000,
+                "polling for completion",
+            );
             let poll_resp = client
                 .get(&poll_url)
                 .header("Authorization", format!("Bearer {}", api_key))
@@ -140,7 +150,7 @@ impl MediaProvider for WanVideoProvider {
             let poll_response = match poll_resp {
                 Ok(r) => r,
                 Err(e) => {
-                    ui::fail_msg(&format!("Wan poll error: {}", e));
+                    tel::fail_msg(&format!("Wan poll error: {}", e));
                     continue;
                 }
             };
@@ -167,18 +177,18 @@ impl MediaProvider for WanVideoProvider {
                     return download_to(client, video_url, output_path, options.verbose).await;
                 }
                 "FAILED" | "CANCELED" | "UNKNOWN" => {
-                    ui::fail_msg(&format!("Wan task {} {}", task_id, st));
+                    tel::fail_msg(&format!("Wan task {} {}", task_id, st));
                     return Ok(false);
                 }
                 _ => {
                     if options.verbose {
-                        ui::verbose(&format!("Wan task {} status {}", task_id, st));
+                        tel::verbose(&format!("Wan task {} status {}", task_id, st));
                     }
                 }
             }
         }
 
-        ui::fail_msg(&format!("Wan task {} timed out", task_id));
+        tel::fail_msg(&format!("Wan task {} timed out", task_id));
         Ok(false)
     }
 

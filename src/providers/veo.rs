@@ -5,7 +5,8 @@ use serde_json::json;
 
 use crate::attachments::LoadedAttachment;
 use crate::providers::{GenerationOptions, MediaProvider};
-use crate::ui;
+use crate::telemetry as tel;
+use crate::telemetry::progress;
 
 const DEFAULT_MODEL: &str = "veo-3.0-generate-001";
 const API_BASE: &str = "https://generativelanguage.googleapis.com/v1beta";
@@ -98,22 +99,23 @@ impl MediaProvider for VeoProvider {
         );
 
         if options.verbose {
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "POST {}/models/{}:predictLongRunning?key=***",
                 API_BASE, model
             ));
             let preview: String = prompt_text.chars().take(120).collect();
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "Prompt: {}{}",
                 preview,
                 if prompt_text.len() > 120 { "..." } else { "" }
             ));
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "Model: {}, duration: {}s, aspect: {}, resolution: {}",
                 model, duration, aspect_ratio, resolution
             ));
         }
 
+        progress::provider_request("veo", &options.model, url.split('?').next().unwrap_or(&url), 1);
         let client = reqwest::Client::new();
 
         let resp = client
@@ -127,12 +129,14 @@ impl MediaProvider for VeoProvider {
         let response = match resp {
             Ok(r) => r,
             Err(e) => {
-                ui::fail_msg(&format!("Network error submitting to Veo: {}", e));
+                progress::provider_response("veo", 0, false, 1);
+                tel::fail_msg(&format!("Network error submitting to Veo: {}", e));
                 return Ok(false);
             }
         };
 
         let status = response.status();
+        progress::provider_response("veo", status.as_u16(), status.is_success(), 1);
         if status.as_u16() == 401 || status.as_u16() == 403 {
             let body_text = response.text().await.unwrap_or_default();
             color_eyre::eyre::bail!(
@@ -143,7 +147,7 @@ impl MediaProvider for VeoProvider {
         }
         if !status.is_success() {
             let body_text = response.text().await.unwrap_or_default();
-            ui::fail_msg(&format!(
+            tel::fail_msg(&format!(
                 "Veo API error ({}): {}",
                 status.as_u16(),
                 &body_text[..body_text.len().min(300)]
@@ -157,9 +161,9 @@ impl MediaProvider for VeoProvider {
         })?;
 
         if options.verbose {
-            ui::verbose(&format!("Operation: {}", operation_name));
+            tel::verbose(&format!("Operation: {}", operation_name));
         }
-        ui::info(&format!(
+        tel::info(&format!(
             "Veo operation {} — polling for completion",
             operation_name
         ));
@@ -168,6 +172,12 @@ impl MediaProvider for VeoProvider {
 
         for attempt in 1..=MAX_POLL_ATTEMPTS {
             tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_SECS)).await;
+            progress::provider_retry(
+                "veo",
+                attempt as usize,
+                POLL_INTERVAL_SECS * 1000,
+                "polling for completion",
+            );
 
             let poll_resp = client
                 .get(&poll_url)
@@ -179,7 +189,7 @@ impl MediaProvider for VeoProvider {
                 Ok(r) => r,
                 Err(e) => {
                     if options.verbose {
-                        ui::verbose(&format!("Poll attempt {} failed: {}", attempt, e));
+                        tel::verbose(&format!("Poll attempt {} failed: {}", attempt, e));
                     }
                     continue;
                 }
@@ -187,7 +197,7 @@ impl MediaProvider for VeoProvider {
 
             if !poll_response.status().is_success() {
                 if options.verbose {
-                    ui::verbose(&format!(
+                    tel::verbose(&format!(
                         "Poll attempt {} returned {}",
                         attempt,
                         poll_response.status()
@@ -203,7 +213,7 @@ impl MediaProvider for VeoProvider {
                 // Check for error
                 if let Some(error) = poll_result.get("error") {
                     let msg = error["message"].as_str().unwrap_or("unknown error");
-                    ui::fail_msg(&format!("Veo generation failed: {}", msg));
+                    tel::fail_msg(&format!("Veo generation failed: {}", msg));
                     return Ok(false);
                 }
 
@@ -215,7 +225,7 @@ impl MediaProvider for VeoProvider {
                         let video_uri = first["video"]["uri"].as_str().unwrap_or("");
 
                         if video_uri.is_empty() {
-                            ui::fail_msg("Veo returned done but no video URI");
+                            tel::fail_msg("Veo returned done but no video URI");
                             return Ok(false);
                         }
 
@@ -234,19 +244,19 @@ impl MediaProvider for VeoProvider {
                     }
                 }
 
-                ui::fail_msg("Veo returned done but no generated samples");
+                tel::fail_msg("Veo returned done but no generated samples");
                 return Ok(false);
             }
 
             if options.verbose && attempt % 3 == 0 {
-                ui::verbose(&format!(
+                tel::verbose(&format!(
                     "Still processing (poll {}/{})",
                     attempt, MAX_POLL_ATTEMPTS
                 ));
             }
         }
 
-        ui::fail_msg(&format!(
+        tel::fail_msg(&format!(
             "Veo operation {} timed out after {} polls",
             operation_name, MAX_POLL_ATTEMPTS
         ));
@@ -265,7 +275,7 @@ async fn download_file(
     verbose: bool,
 ) -> color_eyre::Result<bool> {
     if verbose {
-        ui::verbose(&format!("Downloading: {}", url));
+        tel::verbose(&format!("Downloading: {}", url));
     }
 
     let resp = client
@@ -277,7 +287,7 @@ async fn download_file(
     match resp {
         Ok(response) => {
             if !response.status().is_success() {
-                ui::fail_msg(&format!("Download failed: HTTP {}", response.status()));
+                tel::fail_msg(&format!("Download failed: HTTP {}", response.status()));
                 return Ok(false);
             }
             let bytes = response.bytes().await?;
@@ -288,7 +298,7 @@ async fn download_file(
             Ok(true)
         }
         Err(e) => {
-            ui::fail_msg(&format!("Download error: {}", e));
+            tel::fail_msg(&format!("Download error: {}", e));
             Ok(false)
         }
     }

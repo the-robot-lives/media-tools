@@ -5,7 +5,8 @@ use serde_json::json;
 
 use crate::attachments::LoadedAttachment;
 use crate::providers::{GenerationOptions, MediaProvider};
-use crate::ui;
+use crate::telemetry as tel;
+use crate::telemetry::progress;
 
 const DEFAULT_MODEL: &str = "grok-imagine-video";
 const API_BASE: &str = "https://api.x.ai/v1";
@@ -77,19 +78,20 @@ impl MediaProvider for GrokVideoProvider {
         let url = format!("{}/videos/generations", API_BASE);
 
         if options.verbose {
-            ui::verbose(&format!("POST {}", url));
+            tel::verbose(&format!("POST {}", url));
             let preview: String = prompt_text.chars().take(120).collect();
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "Prompt: {}{}",
                 preview,
                 if prompt_text.len() > 120 { "..." } else { "" }
             ));
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "Model: {}, duration: {}s, aspect: {}, resolution: {}",
                 model, duration, aspect_ratio, resolution
             ));
         }
 
+        progress::provider_request("grok-video", &options.model, &url, 1);
         let client = reqwest::Client::new();
 
         let resp = client
@@ -104,12 +106,14 @@ impl MediaProvider for GrokVideoProvider {
         let response = match resp {
             Ok(r) => r,
             Err(e) => {
-                ui::fail_msg(&format!("Network error submitting to Grok Video: {}", e));
+                progress::provider_response("grok-video", 0, false, 1);
+                tel::fail_msg(&format!("Network error submitting to Grok Video: {}", e));
                 return Ok(false);
             }
         };
 
         let status = response.status();
+        progress::provider_response("grok-video", status.as_u16(), status.is_success(), 1);
         if status.as_u16() == 401 || status.as_u16() == 403 {
             let body_text = response.text().await.unwrap_or_default();
             color_eyre::eyre::bail!(
@@ -120,7 +124,7 @@ impl MediaProvider for GrokVideoProvider {
         }
         if !status.is_success() {
             let body_text = response.text().await.unwrap_or_default();
-            ui::fail_msg(&format!(
+            tel::fail_msg(&format!(
                 "Grok Video API error ({}): {}",
                 status.as_u16(),
                 &body_text[..body_text.len().min(300)]
@@ -134,9 +138,9 @@ impl MediaProvider for GrokVideoProvider {
             .ok_or_else(|| color_eyre::eyre::eyre!("No request_id in Grok response: {}", result))?;
 
         if options.verbose {
-            ui::verbose(&format!("Request submitted: {}", request_id));
+            tel::verbose(&format!("Request submitted: {}", request_id));
         }
-        ui::info(&format!(
+        tel::info(&format!(
             "Grok video {} — polling for completion",
             request_id
         ));
@@ -145,6 +149,12 @@ impl MediaProvider for GrokVideoProvider {
 
         for attempt in 1..=MAX_POLL_ATTEMPTS {
             tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_SECS)).await;
+            progress::provider_retry(
+                "grok-video",
+                attempt as usize,
+                POLL_INTERVAL_SECS * 1000,
+                "polling for completion",
+            );
 
             let poll_resp = client
                 .get(&poll_url)
@@ -157,7 +167,7 @@ impl MediaProvider for GrokVideoProvider {
                 Ok(r) => r,
                 Err(e) => {
                     if options.verbose {
-                        ui::verbose(&format!("Poll attempt {} failed: {}", attempt, e));
+                        tel::verbose(&format!("Poll attempt {} failed: {}", attempt, e));
                     }
                     continue;
                 }
@@ -165,7 +175,7 @@ impl MediaProvider for GrokVideoProvider {
 
             if !poll_response.status().is_success() {
                 if options.verbose {
-                    ui::verbose(&format!(
+                    tel::verbose(&format!(
                         "Poll attempt {} returned {}",
                         attempt,
                         poll_response.status()
@@ -182,13 +192,13 @@ impl MediaProvider for GrokVideoProvider {
                     let video_url = poll_result["video"]["url"].as_str().unwrap_or("");
 
                     if video_url.is_empty() {
-                        ui::fail_msg("Grok returned done but no video URL");
+                        tel::fail_msg("Grok returned done but no video URL");
                         return Ok(false);
                     }
 
                     if options.verbose {
                         if let Some(dur) = poll_result["video"]["duration"].as_f64() {
-                            ui::verbose(&format!("Duration: {:.1}s", dur));
+                            tel::verbose(&format!("Duration: {:.1}s", dur));
                         }
                     }
 
@@ -198,16 +208,16 @@ impl MediaProvider for GrokVideoProvider {
                     let err_msg = poll_result["error"]["message"]
                         .as_str()
                         .unwrap_or("unknown error");
-                    ui::fail_msg(&format!("Grok video generation failed: {}", err_msg));
+                    tel::fail_msg(&format!("Grok video generation failed: {}", err_msg));
                     return Ok(false);
                 }
                 "expired" => {
-                    ui::fail_msg(&format!("Grok video request {} expired", request_id));
+                    tel::fail_msg(&format!("Grok video request {} expired", request_id));
                     return Ok(false);
                 }
                 "pending" => {
                     if options.verbose && attempt % 6 == 0 {
-                        ui::verbose(&format!(
+                        tel::verbose(&format!(
                             "Still pending (poll {}/{})",
                             attempt, MAX_POLL_ATTEMPTS
                         ));
@@ -215,13 +225,13 @@ impl MediaProvider for GrokVideoProvider {
                 }
                 _ => {
                     if options.verbose {
-                        ui::verbose(&format!("Unknown status: {}", status_str));
+                        tel::verbose(&format!("Unknown status: {}", status_str));
                     }
                 }
             }
         }
 
-        ui::fail_msg(&format!(
+        tel::fail_msg(&format!(
             "Grok video {} timed out after {} polls",
             request_id, MAX_POLL_ATTEMPTS
         ));
@@ -240,7 +250,7 @@ async fn download_file(
     verbose: bool,
 ) -> color_eyre::Result<bool> {
     if verbose {
-        ui::verbose(&format!("Downloading: {}", url));
+        tel::verbose(&format!("Downloading: {}", url));
     }
 
     let resp = client
@@ -252,7 +262,7 @@ async fn download_file(
     match resp {
         Ok(response) => {
             if !response.status().is_success() {
-                ui::fail_msg(&format!("Download failed: HTTP {}", response.status()));
+                tel::fail_msg(&format!("Download failed: HTTP {}", response.status()));
                 return Ok(false);
             }
             let bytes = response.bytes().await?;
@@ -263,7 +273,7 @@ async fn download_file(
             Ok(true)
         }
         Err(e) => {
-            ui::fail_msg(&format!("Download error: {}", e));
+            tel::fail_msg(&format!("Download error: {}", e));
             Ok(false)
         }
     }

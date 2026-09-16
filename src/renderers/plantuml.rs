@@ -40,7 +40,7 @@ impl Renderer for PlantUmlRenderer {
             Ok(true)
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("plantuml failed: {}", stderr);
+            crate::telemetry::raw(&format!("plantuml failed: {}", stderr));
             Ok(false)
         }
     }
