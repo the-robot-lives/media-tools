@@ -40,6 +40,8 @@ pub async fn run_generation(
     prompts: Vec<ParsedPrompt>,
     config: &PipelineConfig,
 ) -> color_eyre::Result<()> {
+    enforce_gemini_image_minimum(&prompts, config)?;
+
     // Validate attachments
     tel::step("Validating prompt files");
     for prompt in &prompts {
@@ -1619,6 +1621,42 @@ fn write_variant_metadata(
 fn format_provider_options(options: &HashMap<String, serde_yaml::Value>) -> String {
     let ordered: BTreeMap<&String, &serde_yaml::Value> = options.iter().collect();
     format!("{:?}", ordered)
+}
+
+/// Reject Gemini image models below the supported generation before prep, eval, dry-run,
+/// or any paid call.
+///
+/// Defaulting to a current model is not the same as enforcing a minimum: a caller can still
+/// name an older model in the prompt file, on the CLI (`--model`), in a `media-tool.yaml`
+/// fallback tier, or via the `generate_content_model` provider option. Every one of those
+/// routes lands in the resolved candidate list, so that is what is checked here.
+/// [`providers::gemini::GeminiProvider::generate`] re-validates for callers that bypass
+/// this pipeline.
+fn enforce_gemini_image_minimum(
+    prompts: &[ParsedPrompt],
+    config: &PipelineConfig,
+) -> color_eyre::Result<()> {
+    for prompt in prompts {
+        if prompt.meta.asset_type != AssetType::Image {
+            continue;
+        }
+        let quality = config.quality_override.unwrap_or(prompt.meta.quality);
+        let candidates = if config.service_override.is_some() || prompt.meta.service.is_some() {
+            resolve_candidates(config, prompt, quality)
+        } else {
+            candidates_for(prompt.meta.asset_type, prompt.meta.audio_kind, quality)
+        };
+        for candidate in candidates {
+            if candidate.service == "gemini" {
+                providers::gemini::validate_image_options(&build_options(
+                    candidate.model,
+                    prompt,
+                    config,
+                ))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

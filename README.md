@@ -44,3 +44,15 @@ Deep reference — full schema fields, CLI flags, provider matrix, attachments/d
 - `bin/` — `generate-media-prompt`, `media-eval-port-forward`
 - `web/` — test lab frontend · `helm/` — vendored chart · `skill/` — content-media-engine agent skill
 - `demos/`, `media-tool.yaml` — examples and provider/prompt config
+
+## Gemini image model minimum
+
+Image generation requires **Gemini 3 or newer**. Gemini 2.x models and unversioned
+aliases are rejected before prompt prep, eval, or any API call — including under
+`--dry-run` — whether they arrive from `service:`/`model:` in a prompt file, `--model`
+on the CLI, a `media-tool.yaml` fallback tier, or a `generate_content_model` provider
+option. The whole 3.x family is allowed, `gemini-3-pro-image` included. Gemini
+chat/text models are unaffected.
+
+`generate-media-prompt models` prints the documented image catalog and the policy
+offline. See `docs/providers.md` for details.

@@ -96,6 +96,8 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// List documented Gemini image models and the minimum-version policy (offline)
+    Models,
     /// Interactive web lab: browse types, generate, view, and eval media
     Lab {
         /// Listen port (default 8787)
@@ -131,6 +133,11 @@ async fn main() -> color_eyre::Result<()> {
         .install()?;
     install_terminal_subscriber();
     let cli = Cli::parse();
+
+    if matches!(cli.command, Some(Commands::Models)) {
+        println!("{}", media_tool::providers::gemini::IMAGE_MODELS);
+        return Ok(());
+    }
 
     // Load .envrc.k8.dc for API keys (GEMINI, SUNO, OPENAI, ELEVENLABS, DASHSCOPE)
     orchestrator::load_envrc();
