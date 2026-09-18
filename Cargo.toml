@@ -1,6 +1,6 @@
 [package]
 name = "generate-media-prompt"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 description = "Generate media assets from .media.prompt YAML files"
 
@@ -38,6 +38,7 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 
 [dev-dependencies]
 insta = "1"
+base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 [profile.release]

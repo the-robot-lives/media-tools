@@ -17,7 +17,7 @@ const DEFAULT_MODEL: &str = "qwen-image-3.0";
 /// the connection-level defaults died at roughly a minute with a bare
 /// "error sending request" — well before the nominal 180s. Override with
 /// `MEDIA_QWEN_TIMEOUT_SECS`.
-const DEFAULT_TIMEOUT_SECS: u64 = 300;
+const DEFAULT_TIMEOUT_SECS: u64 = 360;
 
 /// How long to wait on the *submission* leg when async task mode is on. The submit
 /// returns a task id in about a second, so this stays short.
@@ -26,6 +26,19 @@ const SUBMIT_TIMEOUT_SECS: u64 = 60;
 /// Poll cadence and ceiling for async task mode. 120 x 5s = 10 minutes.
 const POLL_INTERVAL_SECS: u64 = 5;
 const MAX_POLL_ATTEMPTS: u32 = 120;
+
+/// How many times to re-send a synchronous request whose connection the server dropped.
+/// DashScope closes `multimodal-generation` at ~61s while one heavy render takes 45-75s, so a
+/// single attempt is a coin toss. Override with `MEDIA_QWEN_RETRIES`.
+const DEFAULT_CONNECTION_RETRIES: u32 = 3;
+
+fn connection_retries() -> u32 {
+    std::env::var("MEDIA_QWEN_RETRIES")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(DEFAULT_CONNECTION_RETRIES)
+}
 
 /// Total request timeout for a qwen-image call.
 fn request_timeout() -> Duration {
@@ -230,7 +243,9 @@ impl MediaProvider for QwenImageProvider {
             } else {
                 request_timeout()
             };
-            let client = http::client_with_timeout(total);
+            // Pinned to HTTP/1.1: long DashScope renders complete over h1 and die at ~61s
+            // over h2. See `http::client_http1_with_timeout`.
+            let client = http::client_http1_with_timeout(total);
             let mut request = client
                 .post(&api_url)
                 .header("Authorization", format!("Bearer {}", api_key))
@@ -241,17 +256,40 @@ impl MediaProvider for QwenImageProvider {
             (client, request.json(&body).timeout(total))
         };
 
-        let (mut client, request) = submit(use_async);
-        let resp = request.send().await;
-
-        let mut response = match resp {
-            Ok(r) => r,
-            Err(e) => {
-                progress::provider_response("qwen-image", 0, false, 1);
-                tel::fail_msg(&format!("Network error calling Qwen Image: {}", e));
-                return Ok(false);
+        // The synchronous multimodal route sits on a ~61s server-side close (see `Route`), and
+        // one render's latency straddles it, so the same request succeeds or dies depending on
+        // load. Retry a dropped connection rather than failing the render on a coin toss.
+        // Async submits return in about a second and never need this.
+        let attempts = if use_async { 1 } else { connection_retries() };
+        let mut client;
+        let mut response;
+        let mut attempt = 1;
+        loop {
+            let (c, request) = submit(use_async);
+            client = c;
+            match request.send().await {
+                Ok(r) => {
+                    response = r;
+                    break;
+                }
+                Err(e) if attempt < attempts => {
+                    tel::warn_msg(&format!(
+                        "Qwen Image connection dropped on attempt {}/{} ({}) \u{2014} retrying",
+                        attempt, attempts, e
+                    ));
+                    progress::provider_retry("qwen-image", attempt as usize, 0, "connection dropped");
+                    attempt += 1;
+                }
+                Err(e) => {
+                    progress::provider_response("qwen-image", 0, false, 1);
+                    tel::fail_msg(&format!(
+                        "Network error calling Qwen Image after {} attempt(s): {}",
+                        attempt, e
+                    ));
+                    return Ok(false);
+                }
             }
-        };
+        }
 
         // An account not entitled to async mode answers 403 AccessDenied. That is a
         // capability answer, not a credential answer \u2014 drop the header and redo the call

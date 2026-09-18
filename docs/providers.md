@@ -84,20 +84,32 @@ post_processing:
 qwen-image reaches DashScope by one of two routes, and they behave very differently.
 
 **`multimodal-generation` is synchronous only** on our accounts, and the server closes the
-connection at about 61 seconds. No client setting avoids it — measured against the live
-endpoint with the same heavy prompt:
+connection at about 61 seconds. Measured against the live endpoint with the same heavy prompt:
 
 | Client | Protocol | Outcome |
 |--------|----------|---------|
-| curl x3, loaded service | HTTP/2 | `Error in the HTTP2 framing layer` at 61.7 / 61.5 / 61.5s |
-| this crate, loaded service | HTTP/1.1 | "error sending request" at ~62s |
+| curl x3 | HTTP/2 | `Error in the HTTP2 framing layer` at 61.7 / 61.5 / 61.5s |
+| curl | HTTP/1.1 | HTTP 200 at 55.8s, then `Empty reply from server` at 61.1s |
+| this crate, h1-only | HTTP/1.1 | cut at 60.9s, then succeeded at 120.9s with one retry |
 | this crate x3, idle service | HTTP/1.1 | HTTP 200 at 46.8 / 53.7 / 57.0s |
 
-Render latency for one prompt swings roughly between 45s and 75s with service load, so this
-route is a coin toss against the ceiling rather than a path that can be tuned. The route also
-answers HTTP 403 `AccessDenied` — "current user api does not support asynchronous calls"
-— to the async header, so async is not available on it. It is still the **only** route that
-accepts input images, so prompts with attachments use it automatically.
+**The cut is not HTTP/2-specific.** That was the working theory for a while, since the h2
+framing error is loud and reproducible. But pinning curl to `--http1.1` only changes how the
+same close is reported, to `Empty reply from server`, and this crate cannot speak HTTP/2 at all
+(the `h2` crate is not in its dependency graph) yet is cut at the same mark. The client is not
+the variable; the server is.
+
+What the numbers say is that one render's latency straddles the ceiling, swinging roughly
+between 45s and 75s with service load, so the same request succeeds or dies on a coin toss.
+No client setting moves a server-side close. Two mitigations follow:
+
+* prompts **without** input images use the async route below, which has no such limit;
+* prompts **with** input images have no async route available, so a dropped connection is
+  retried, three attempts by default (`MEDIA_QWEN_RETRIES`). Measured, one retry was enough.
+
+The route also answers HTTP 403 `AccessDenied` — "current user api does not support
+asynchronous calls" — to the async header, so async is not available on it. It remains the
+**only** route that accepts input images, so prompts with attachments use it automatically.
 
 **`text2image/image-synthesis` is async-native**, and is now the default when a prompt has no
 input images. The POST carries `X-DashScope-Async: enable` and returns a `task_id` in about a
@@ -112,14 +124,18 @@ URL. The same heavy prompt that sits on the ceiling synchronously finished here 
 > ~60s ceiling.
 
 Clients are built through `providers::http` with an explicit connect timeout, connection
-idle-pool retirement disabled and TCP keepalive on. That removes the hidden ceilings beneath
-the per-request deadline; it does not and cannot defeat a server-side close.
+idle-pool retirement disabled, TCP keepalive on, and HTTP/1.1 pinned. That removes the hidden
+ceilings beneath the per-request deadline; it does not and cannot defeat a server-side close.
+The HTTP/1.1 pin is belt-and-braces rather than a behaviour change, since this build has no
+HTTP/2 support to begin with; it keeps a future feature-unification surprise from quietly
+putting long renders back on h2.
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
 | `provider_options.route` | `text2image`, or `multimodal` when the prompt has input images | Force a route: `text2image` / `multimodal`. |
 | `provider_options.async` / `MEDIA_QWEN_ASYNC=1\|0` | on for text2image, off for multimodal | Override async task mode. A route that rejects async on capability grounds falls back to a synchronous call. |
-| `MEDIA_QWEN_TIMEOUT_SECS` | 300 | Client + request ceiling in synchronous mode. |
+| `MEDIA_QWEN_TIMEOUT_SECS` | 360 | Client + request ceiling in synchronous mode. |
+| `MEDIA_QWEN_RETRIES` | 3 | Attempts for a synchronous request whose connection the server drops. |
 | `MEDIA_QWEN_POLL_SECS` | 5 | Poll interval in async mode. |
 | `MEDIA_QWEN_POLL_ATTEMPTS` | 120 | Poll ceiling (default 10 minutes). |
 | `MEDIA_DEBUG=1` | off | Log the HTTP client configuration at request time. |
