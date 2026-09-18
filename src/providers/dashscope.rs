@@ -48,6 +48,15 @@ pub fn multimodal_url(options: &GenerationOptions) -> String {
     )
 }
 
+/// Async-native text-to-image route. Unlike `multimodal_url`, this one accepts
+/// `X-DashScope-Async: enable` on our accounts and returns a task id in about a second.
+pub fn text2image_url(options: &GenerationOptions) -> String {
+    format!(
+        "{}/api/v1/services/aigc/text2image/image-synthesis",
+        api_root(options)
+    )
+}
+
 pub fn video_synthesis_url(options: &GenerationOptions) -> String {
     format!(
         "{}/api/v1/services/aigc/video-generation/video-synthesis",

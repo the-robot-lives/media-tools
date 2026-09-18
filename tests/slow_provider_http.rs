@@ -188,7 +188,9 @@ async fn spawn_dashscope_stub(submit_delay: Duration) -> (SocketAddr, Arc<Atomic
                 let req = read_request(&mut stream).await;
                 let first_line = req.lines().next().unwrap_or_default().to_string();
 
-                if first_line.contains("/multimodal-generation/generation") {
+                if first_line.contains("/multimodal-generation/generation")
+                    || first_line.contains("/text2image/image-synthesis")
+                {
                     if req.to_lowercase().contains("x-dashscope-async: enable") {
                         async_headers.fetch_add(1, Ordering::SeqCst);
                     }
@@ -302,7 +304,9 @@ async fn inline_response_is_used_without_polling() {
             };
             tokio::spawn(async move {
                 let req = read_request(&mut stream).await;
-                if req.contains("/multimodal-generation/generation") {
+                if req.contains("/multimodal-generation/generation")
+                    || req.contains("/text2image/image-synthesis")
+                {
                     let url = format!("http://{addr}/img/inline.png");
                     let body = format!(
                         r#"{{"output":{{"choices":[{{"message":{{"content":[{{"image":"{url}"}}]}}}}]}}}}"#
@@ -356,7 +360,9 @@ async fn async_rejection_falls_back_to_a_synchronous_call() {
             let sync_calls = sync_c.clone();
             tokio::spawn(async move {
                 let req = read_request(&mut stream).await;
-                if req.contains("/multimodal-generation/generation") {
+                if req.contains("/multimodal-generation/generation")
+                    || req.contains("/text2image/image-synthesis")
+                {
                     if req.to_lowercase().contains("x-dashscope-async: enable") {
                         let body = r#"{"request_id":"r1","code":"AccessDenied","message":"current user api does not support asynchronous calls"}"#;
                         let resp = format!(

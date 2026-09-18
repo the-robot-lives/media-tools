@@ -33,27 +33,29 @@ fn request_timeout() -> Duration {
         .unwrap_or(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
 }
 
-/// Async task mode (`X-DashScope-Async: enable`) is **opt-in**.
+/// Explicit async-mode override, or `None` to let the route decide.
 ///
-/// It would be the better shape for a long render \u2014 submit, get a task id in about a
-/// second, poll for the result \u2014 but the multimodal-generation endpoint rejects it on
-/// the accounts we use, with HTTP 403 `AccessDenied`: "current user api does not support
-/// asynchronous calls". Defaulting it on would turn every render into a guaranteed 403.
-/// So the default is the synchronous call over a hardened client, and async is available
-/// for any account entitled to it.
+/// The two routes differ: `text2image/image-synthesis` is async-native and defaults to
+/// async, while `multimodal-generation` answers HTTP 403 `AccessDenied` \u2014 "current user
+/// api does not support asynchronous calls" \u2014 to the async header on our accounts, so it
+/// defaults to synchronous.
 ///
-/// Enable per prompt with `provider_options: {async: true}` or globally with
-/// `MEDIA_QWEN_ASYNC=1`. If the endpoint rejects it, the provider transparently retries
-/// synchronously rather than failing the render.
-fn async_mode(options: &GenerationOptions) -> bool {
+/// Override per prompt with `provider_options: {async: true|false}` or globally with
+/// `MEDIA_QWEN_ASYNC=1|0`. If a route rejects async on capability grounds the provider
+/// transparently retries synchronously rather than failing the render.
+fn async_mode_opt(options: &GenerationOptions) -> Option<bool> {
     if let Some(v) = options
         .provider_options
         .get("async")
         .and_then(|v| v.as_bool())
     {
-        return v;
+        return Some(v);
     }
-    std::env::var("MEDIA_QWEN_ASYNC").ok().as_deref() == Some("1")
+    match std::env::var("MEDIA_QWEN_ASYNC").ok().as_deref() {
+        Some("1") => Some(true),
+        Some("0") => Some(false),
+        _ => None,
+    }
 }
 
 /// Does this error body mean "this account cannot use async mode" rather than "your key is
@@ -61,6 +63,60 @@ fn async_mode(options: &GenerationOptions) -> bool {
 fn is_async_unsupported(body: &str) -> bool {
     let lower = body.to_ascii_lowercase();
     lower.contains("asynchronous call") || lower.contains("async call")
+}
+
+/// Which DashScope route a qwen-image call takes.
+///
+/// The two behave very differently under load:
+///
+/// * `multimodal-generation` is **synchronous only** on our accounts. Measured against the
+///   live endpoint, it closes the connection at ~61s regardless of client: curl over HTTP/2
+///   fails three for three at 61.5s, and this crate (HTTP/1.1) fails at 62s. Anything that
+///   renders for longer than a minute cannot complete here. It is still the only route that
+///   accepts input images, so edits stay on it.
+/// * `text2image/image-synthesis` is **async-native**: `X-DashScope-Async: enable` is
+///   accepted, the submit returns a `task_id` in about a second, and the result is collected
+///   by polling `/api/v1/tasks/<id>`. The same heavy prompt that times out on the sync route
+///   finishes here in 6s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Route {
+    /// Async-native text-to-image. Default when there are no input images.
+    Text2Image,
+    /// Synchronous multimodal generation. Required for image edits; subject to the ~60s
+    /// server-side ceiling.
+    Multimodal,
+}
+
+/// Pick the route: forced by `provider_options.route` if set, otherwise multimodal when the
+/// prompt carries input images (text2image cannot accept them) and text2image otherwise.
+pub fn route_for(options: &GenerationOptions, has_attachments: bool) -> Route {
+    match options
+        .provider_options
+        .get("route")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("text2image") | Some("t2i") | Some("image-synthesis") => Route::Text2Image,
+        Some("multimodal") | Some("multimodal-generation") => Route::Multimodal,
+        _ => {
+            if has_attachments {
+                Route::Multimodal
+            } else {
+                Route::Text2Image
+            }
+        }
+    }
+}
+
+/// The text2image route does not accept the multimodal model ids: `qwen-image-3.0` there
+/// answers 400 InvalidParameter. Map the multimodal default onto the text2image family and
+/// leave anything already valid alone.
+pub fn text2image_model(model: &str) -> &str {
+    match model {
+        "qwen-image-3.0" | "qwen-image-3" | "default" | "" => "qwen-image",
+        other => other,
+    }
 }
 
 /// Pull an image URL out of either response shape: the synchronous multimodal payload or
@@ -108,9 +164,6 @@ impl MediaProvider for QwenImageProvider {
         content.push(json!({ "text": prompt_text }));
 
         let mut parameters = json!({});
-        if let Some(neg) = options.negative_prompt.as_deref() {
-            parameters["negative_prompt"] = json!(neg);
-        }
         if let Some(size) = size_param(options) {
             parameters["size"] = json!(size);
         }
@@ -122,23 +175,52 @@ impl MediaProvider for QwenImageProvider {
             parameters["n"] = json!(n);
         }
 
-        let body = json!({
-            "model": model,
-            "input": {
-                "messages": [{ "role": "user", "content": content }]
-            },
-            "parameters": parameters,
-        });
+        let route = route_for(options, !attachments.is_empty());
 
-        let api_url = dashscope::multimodal_url(options);
+        let (api_url, body, effective_model) = match route {
+            Route::Text2Image => {
+                let t2i_model = text2image_model(model).to_string();
+                let mut input = json!({ "prompt": prompt_text });
+                if let Some(neg) = options.negative_prompt.as_deref() {
+                    input["negative_prompt"] = json!(neg);
+                }
+                let body = json!({
+                    "model": t2i_model,
+                    "input": input,
+                    "parameters": parameters,
+                });
+                (dashscope::text2image_url(options), body, t2i_model)
+            }
+            Route::Multimodal => {
+                let mut parameters = parameters.clone();
+                if let Some(neg) = options.negative_prompt.as_deref() {
+                    parameters["negative_prompt"] = json!(neg);
+                }
+                let body = json!({
+                    "model": model,
+                    "input": {
+                        "messages": [{ "role": "user", "content": content }]
+                    },
+                    "parameters": parameters,
+                });
+                (dashscope::multimodal_url(options), body, model.to_string())
+            }
+        };
+
         if options.verbose {
             tel::verbose(&format!("POST {}", api_url));
-            tel::verbose(&format!("Model: {}", model));
+            tel::verbose(&format!("Model: {} (route: {:?})", effective_model, route));
         }
 
         progress::provider_request("qwen-image", &options.model, &api_url, 1);
 
-        let mut use_async = async_mode(options);
+        // text2image is async-native and the whole point of using it, so async is on there
+        // by default. On the multimodal route it stays opt-in, because that endpoint answers
+        // 403 AccessDenied to the async header on our accounts.
+        let mut use_async = match route {
+            Route::Text2Image => async_mode_opt(options).unwrap_or(true),
+            Route::Multimodal => async_mode_opt(options).unwrap_or(false),
+        };
 
         // In async mode the connection only has to survive the submit; in sync mode it has
         // to survive the whole render, so the client-level ceiling follows the mode.
