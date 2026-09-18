@@ -4,6 +4,7 @@ pub mod elevenlabs;
 pub mod gemini;
 pub mod gemini_chat;
 pub mod grok_video;
+pub mod http;
 pub mod groq_chat;
 pub mod openai_chat;
 pub mod openai_tts;

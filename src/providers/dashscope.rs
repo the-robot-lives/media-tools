@@ -7,7 +7,20 @@ const TOKEN_PLAN: &str = "https://token-plan.ap-southeast-1.maas.aliyuncs.com";
 const KEY_ENVS: &[&str] = &["DASHSCOPE_API_KEY", "QWEN_API_KEY", "QWEN_TOKEN_KEY"];
 
 /// DashScope / Model Studio API root from provider_options `plan` / `region`.
-pub fn api_root(options: &GenerationOptions) -> &'static str {
+pub fn api_root(options: &GenerationOptions) -> String {
+    // `base_url` overrides the plan/region routing. Used by tests to point a provider at
+    // a stub server; also an escape hatch for a proxy or a regional endpoint we do not
+    // have a named plan for.
+    if let Some(base) = options
+        .provider_options
+        .get("base_url")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim_end_matches('/'))
+        .filter(|s| !s.is_empty())
+    {
+        return base.to_string();
+    }
+
     let plan = options
         .provider_options
         .get("plan")
@@ -25,6 +38,7 @@ pub fn api_root(options: &GenerationOptions) -> &'static str {
         "cn" | "beijing" => CN,
         _ => INTL,
     }
+    .to_string()
 }
 
 pub fn multimodal_url(options: &GenerationOptions) -> String {
