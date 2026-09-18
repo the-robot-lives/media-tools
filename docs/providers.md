@@ -78,6 +78,32 @@ post_processing:
 | `musicgen` | Audio | Todo | P3 | Medium | none |
 | `udio` | Audio | Todo | P3 | High | `UDIO_API_KEY` |
 | `pika` | Video | Todo | P3 | Medium | `PIKA_API_KEY` |
+
+### qwen-image — long renders and async task mode
+
+`qwen-image-3.0` commonly takes 50-90s at larger sizes. A single held-open connection is
+not a reliable place to wait that long: runs were failing at ~61s with
+`Network error calling Qwen Image: error sending request for url (...)` while the same POST
+succeeded under curl.
+
+Two things address it:
+
+* Clients are built through `providers::http`, with an explicit connect timeout, connection
+  idle-pool retirement **disabled** and TCP keepalive on, so a silent wait for response
+  headers is not dropped beneath the per-request deadline.
+* qwen-image defaults to DashScope **async task mode**: the POST carries
+  `X-DashScope-Async: enable` and returns a `task_id` in about a second, and the result is
+  collected by polling `/api/v1/tasks/<id>`. The render no longer depends on one long
+  connection. A deployment that answers inline anyway is still handled.
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `provider_options.async` / `MEDIA_QWEN_ASYNC=0` | on | Turn async task mode off (single synchronous request). |
+| `MEDIA_QWEN_TIMEOUT_SECS` | 300 | Client + request ceiling in synchronous mode. |
+| `MEDIA_QWEN_POLL_SECS` | 5 | Poll interval in async mode. |
+| `MEDIA_QWEN_POLL_ATTEMPTS` | 120 | Poll ceiling (default 10 minutes). |
+| `provider_options.base_url` | plan/region | Override the DashScope API root. |
+
 | `kling` | Video | Todo | P3 | Medium | `KLING_API_KEY` |
 | `minimax` | Video | Todo | P3 | Medium | `MINIMAX_API_KEY` |
 

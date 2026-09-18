@@ -5,6 +5,24 @@ Tags follow `utilities-agent-media-tool/<milestone>`; pre-import milestones (m1â
 are tagged on the original standalone-repo lineage preserved by the subtree squash.
 
 ## [Unreleased]
+### Fixed
+- qwen-image runs no longer die at ~61s with a bare "Network error calling Qwen Image:
+  error sending request". The provider built a bare `reqwest::Client::new()` and set only a
+  per-request timeout, leaving connection-level defaults (idle-pool retirement, no TCP
+  keepalive) to cut a silent wait long before the nominal 180s. New
+  `src/providers/http.rs` builds clients with an explicit connect timeout, idle-pool
+  retirement disabled and TCP keepalive on. Version 0.2.0 -> 0.2.1. (2026-09-18)
+
+### Changed
+- qwen-image now defaults to DashScope **async task mode** (`X-DashScope-Async: enable`
+  plus task polling), so a long render never depends on holding one connection open past a
+  gateway's idle limit. A deployment that answers inline is still handled. Disable with
+  `provider_options: {async: false}` or `MEDIA_QWEN_ASYNC=0`. Tunables:
+  `MEDIA_QWEN_TIMEOUT_SECS` (sync ceiling, default 300), `MEDIA_QWEN_POLL_SECS` (default 5),
+  `MEDIA_QWEN_POLL_ATTEMPTS` (default 120). (2026-09-18)
+- `provider_options.base_url` overrides DashScope plan/region routing (used by the new
+  stub-server tests). (2026-09-18)
+
 ### Added
 - `post_processing` actions `crop` and `resize` are implemented (`src/postprocess.rs`):
   gravity-anchored aspect crop, and `cover`/`contain`/`fill` resize, applied in place to
