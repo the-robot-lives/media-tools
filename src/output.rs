@@ -86,7 +86,7 @@ pub fn write_metadata(
         let escaped = notes.replace('\\', "\\\\").replace('"', "\\\"");
         content.push_str(&format!(
             "eval_notes: \"{}\"\n",
-            &escaped[..escaped.len().min(500)]
+            crate::text::truncate(&escaped, 500)
         ));
     }
     if !options.is_empty() {

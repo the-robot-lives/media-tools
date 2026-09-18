@@ -114,7 +114,7 @@ impl MediaProvider for OpenAiTtsProvider {
             color_eyre::eyre::bail!(
                 "OpenAI authentication failed ({}): {}\n  Check your OPENAI_API_KEY",
                 status.as_u16(),
-                &body_text[..body_text.len().min(200)]
+                crate::text::truncate(&body_text, 200)
             );
         }
         if !status.is_success() {
@@ -122,7 +122,7 @@ impl MediaProvider for OpenAiTtsProvider {
             tel::fail_msg(&format!(
                 "OpenAI TTS error ({}): {}",
                 status.as_u16(),
-                &body_text[..body_text.len().min(300)]
+                crate::text::truncate(&body_text, 300)
             ));
             return Ok(false);
         }

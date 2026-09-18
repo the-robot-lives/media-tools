@@ -108,7 +108,7 @@ impl MediaProvider for WanVideoProvider {
             color_eyre::eyre::bail!(
                 "Qwen/DashScope authentication failed ({}): {}\n  Check DASHSCOPE_API_KEY / QWEN_API_KEY / QWEN_TOKEN_KEY",
                 status.as_u16(),
-                &body_text[..body_text.len().min(200)]
+                crate::text::truncate(&body_text, 200)
             );
         }
         if !status.is_success() {
@@ -116,7 +116,7 @@ impl MediaProvider for WanVideoProvider {
             tel::fail_msg(&format!(
                 "Wan video error ({}): {}",
                 status.as_u16(),
-                &body_text[..body_text.len().min(300)]
+                crate::text::truncate(&body_text, 300)
             ));
             return Ok(false);
         }

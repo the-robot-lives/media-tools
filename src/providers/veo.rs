@@ -142,7 +142,7 @@ impl MediaProvider for VeoProvider {
             color_eyre::eyre::bail!(
                 "Google AI authentication failed ({}): {}\n  Check your GEMINI_API_KEY",
                 status.as_u16(),
-                &body_text[..body_text.len().min(200)]
+                crate::text::truncate(&body_text, 200)
             );
         }
         if !status.is_success() {
@@ -150,7 +150,7 @@ impl MediaProvider for VeoProvider {
             tel::fail_msg(&format!(
                 "Veo API error ({}): {}",
                 status.as_u16(),
-                &body_text[..body_text.len().min(300)]
+                crate::text::truncate(&body_text, 300)
             ));
             return Ok(false);
         }

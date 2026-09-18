@@ -141,6 +141,19 @@ putting long renders back on h2.
 | `MEDIA_DEBUG=1` | off | Log the HTTP client configuration at request time. |
 | `provider_options.base_url` | plan/region | Override the DashScope API root. |
 
+### qwen content filter refusals can be lexical
+
+A refusal is not always about the image being asked for. The filter also reads the brief's
+wording, and a single phrase can trip it: a camera-batch brief containing **"AV cart"** was
+refused as adult content, and renaming it to **"projector trolley"** cleared the same brief
+with nothing else changed.
+
+So when qwen refuses a brief that looks unobjectionable, suspect a word before rewriting the
+concept. Scan for terms with an unintended second reading, especially initialisms, swap them
+for a plain-language equivalent, and retry. Refusals are per request, so a swap that works can
+simply stay in the prompt file.
+
+
 | `kling` | Video | Todo | P3 | Medium | `KLING_API_KEY` |
 | `minimax` | Video | Todo | P3 | Medium | `MINIMAX_API_KEY` |
 

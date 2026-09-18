@@ -434,7 +434,7 @@ impl PromptPrepper {
                 tel::verbose(&format!(
                     "Prompt prep HTTP {}: {}",
                     status,
-                    &body_text[..body_text.len().min(200)]
+                    crate::text::truncate(&body_text, 200)
                 ));
             }
             return None;
@@ -457,7 +457,7 @@ impl PromptPrepper {
             .to_string();
 
         if verbose {
-            tel::verbose(&format!("Prompt prep raw: {}", &raw[..raw.len().min(300)]));
+            tel::verbose(&format!("Prompt prep raw: {}", crate::text::truncate(&raw, 300)));
         }
 
         let cleaned = strip_reasoning_and_fences(&raw);
@@ -500,7 +500,7 @@ impl PromptPrepper {
                     tel::verbose(&format!(
                         "Prompt prep JSON parse failed: {} — cleaned text: {}",
                         e,
-                        &cleaned[..cleaned.len().min(200)]
+                        crate::text::truncate(&cleaned, 200)
                     ));
                 }
                 None
@@ -595,11 +595,7 @@ impl PromptPrepper {
                 // Text-based outputs (SVG, HTML, etc.) — include inline
                 "svg" | "html" | "mmd" | "tsx" | "md" => {
                     if let Ok(text_content) = std::fs::read_to_string(output_path) {
-                        let truncated = if text_content.len() > 8192 {
-                            &text_content[..8192]
-                        } else {
-                            &text_content
-                        };
+                        let truncated = crate::text::truncate(&text_content, 8192);
                         json!(format!(
                             "{}\n\n[Previous output content]\n{}",
                             instruction, truncated
@@ -674,7 +670,7 @@ impl PromptPrepper {
         if verbose {
             tel::verbose(&format!(
                 "Prompt refine raw: {}",
-                &raw[..raw.len().min(300)]
+                crate::text::truncate(&raw, 300)
             ));
         }
 

@@ -266,7 +266,7 @@ impl MediaProvider for SunoProvider {
             color_eyre::eyre::bail!(
                 "Suno authentication failed ({}): {}\n  Check your SUNO_API_KEY",
                 status.as_u16(),
-                &body_text[..body_text.len().min(200)]
+                crate::text::truncate(&body_text, 200)
             );
         }
         if !status.is_success() {
@@ -274,7 +274,7 @@ impl MediaProvider for SunoProvider {
             tel::fail_msg(&format!(
                 "Suno API error ({}): {}",
                 status.as_u16(),
-                &body_text[..body_text.len().min(300)]
+                crate::text::truncate(&body_text, 300)
             ));
             return Ok(false);
         }
@@ -416,7 +416,7 @@ impl MediaProvider for SunoProvider {
                     if options.verbose {
                         let preview =
                             serde_json::to_string_pretty(&poll_result).unwrap_or_default();
-                        tel::verbose(&preview[..preview.len().min(500)]);
+                        tel::verbose(crate::text::truncate(&preview, 500));
                     }
                     return Ok(false);
                 }

@@ -148,7 +148,7 @@ impl MediaProvider for ElevenLabsProvider {
             color_eyre::eyre::bail!(
                 "ElevenLabs authentication failed ({}): {}\n  Check your ELEVENLABS_API_KEY",
                 status.as_u16(),
-                &body_text[..body_text.len().min(200)]
+                crate::text::truncate(&body_text, 200)
             );
         }
         if !status.is_success() {
@@ -156,7 +156,7 @@ impl MediaProvider for ElevenLabsProvider {
             tel::fail_msg(&format!(
                 "ElevenLabs error ({}): {}",
                 status.as_u16(),
-                &body_text[..body_text.len().min(300)]
+                crate::text::truncate(&body_text, 300)
             ));
             return Ok(false);
         }

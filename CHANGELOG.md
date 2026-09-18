@@ -6,6 +6,19 @@ are tagged on the original standalone-repo lineage preserved by the subtree squa
 
 ## [Unreleased]
 ### Fixed
+- The tool no longer panics while truncating text for display. Every preview of a string the
+  tool does not control (eval notes, provider error bodies, raw LLM replies) used
+  `&s[..s.len().min(n)]`, which indexes bytes and panics when the index lands inside a
+  multibyte UTF-8 character: an eval note containing an ellipsis or CJK text took the whole
+  run down while trying to log itself. New `src/text.rs` cuts at the last character boundary
+  instead, and all 33 call sites now use it. Version 0.2.4 -> 0.2.5. (2026-09-18)
+
+### Added
+- `docs/providers.md`: a note that qwen content-filter refusals can be lexical. A brief saying
+  "AV cart" was refused as adult content; "projector trolley" cleared it unchanged otherwise.
+  (2026-09-18)
+
+### Fixed
 - Image-to-image qwen-image renders (reference images, which must use
   `multimodal-generation` because `text2image` accepts none) now retry a connection the
   server drops, three attempts by default via `MEDIA_QWEN_RETRIES`. Measured live: a single

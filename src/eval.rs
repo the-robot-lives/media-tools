@@ -591,7 +591,7 @@ impl Evaluator {
             if verbose {
                 tel::verbose(&format!(
                     "Eval raw response: {}",
-                    &raw[..raw.len().min(400)]
+                    crate::text::truncate(&raw, 400)
                 ));
             }
 
@@ -943,7 +943,7 @@ fn build_score(parsed: &serde_json::Value, eval: &EvalSection, verbose: bool) ->
             "Eval score: weighted={:.3}, reject_hits={:?}, notes={}",
             weighted,
             reject_hits,
-            &notes[..notes.len().min(120)]
+            crate::text::truncate(&notes, 120)
         ));
     }
 
