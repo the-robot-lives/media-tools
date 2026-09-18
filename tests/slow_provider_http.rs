@@ -11,8 +11,9 @@
 //!
 //! 1. The hardened client survives a response that arrives long after the client has gone
 //!    quiet, and its own deadline is still enforced.
-//! 2. The qwen-image provider's async task mode submits, polls, and downloads — so a long
-//!    render never depends on one held-open connection at all.
+//! 2. The qwen-image provider's async task mode submits, polls, and downloads when it is
+//!    opted into, and falls back to a synchronous call when the account is not entitled to
+//!    it (DashScope answers 403 AccessDenied, which must not read as a bad key).
 //!
 //! The slow-response delay is configurable via `MEDIA_TEST_SLOW_SECS` (default 3) to keep
 //! the suite fast; `slow_response_past_a_real_gateway_timeout` reproduces the real ~90s
@@ -225,11 +226,19 @@ async fn spawn_dashscope_stub(submit_delay: Duration) -> (SocketAddr, Arc<Atomic
 }
 
 fn options_for(addr: SocketAddr) -> GenerationOptions {
+    options_with(addr, None)
+}
+
+/// `async_mode` is `None` to leave the default alone, or an explicit opt-in/opt-out.
+fn options_with(addr: SocketAddr, async_mode: Option<bool>) -> GenerationOptions {
     let mut provider_options = HashMap::new();
     provider_options.insert(
         "base_url".to_string(),
         serde_yaml::Value::String(format!("http://{addr}")),
     );
+    if let Some(v) = async_mode {
+        provider_options.insert("async".to_string(), serde_yaml::Value::Bool(v));
+    }
     GenerationOptions {
         model: "qwen-image-3.0".to_string(),
         aspect_ratio: Some("1:1".to_string()),
@@ -254,7 +263,13 @@ async fn async_task_mode_submits_polls_and_downloads() {
     let _ = std::fs::remove_file(&out);
 
     let ok = QwenImageProvider
-        .generate("a small test card", &out, "test-key", &options_for(addr), &[])
+        .generate(
+            "a small test card",
+            &out,
+            "test-key",
+            &options_with(addr, Some(true)),
+            &[],
+        )
         .await
         .expect("provider must not error");
 
@@ -320,4 +335,101 @@ async fn inline_response_is_used_without_polling() {
     assert_eq!(&std::fs::read(&out).unwrap()[..4], b"\x89PNG");
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// DashScope answers 403 `AccessDenied` / "current user api does not support asynchronous
+/// calls" for an account without the async entitlement. That is a capability answer, not a
+/// credential answer: the provider must drop the header and redo the call synchronously
+/// instead of reporting an authentication failure.
+#[tokio::test]
+async fn async_rejection_falls_back_to_a_synchronous_call() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let sync_calls = Arc::new(AtomicUsize::new(0));
+    let sync_c = sync_calls.clone();
+
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            let sync_calls = sync_c.clone();
+            tokio::spawn(async move {
+                let req = read_request(&mut stream).await;
+                if req.contains("/multimodal-generation/generation") {
+                    if req.to_lowercase().contains("x-dashscope-async: enable") {
+                        let body = r#"{"request_id":"r1","code":"AccessDenied","message":"current user api does not support asynchronous calls"}"#;
+                        let resp = format!(
+                            "HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            body.len(),
+                            body
+                        );
+                        let _ = stream.write_all(resp.as_bytes()).await;
+                        let _ = stream.flush().await;
+                    } else {
+                        sync_calls.fetch_add(1, Ordering::SeqCst);
+                        let url = format!("http://{addr}/img/sync.png");
+                        let body = format!(
+                            r#"{{"output":{{"choices":[{{"message":{{"content":[{{"image":"{url}"}}]}}}}]}}}}"#
+                        );
+                        write_json(&mut stream, &body).await;
+                    }
+                } else {
+                    let png: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+                    let head = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        png.len()
+                    );
+                    let _ = stream.write_all(head.as_bytes()).await;
+                    let _ = stream.write_all(png).await;
+                    let _ = stream.flush().await;
+                }
+            });
+        }
+    });
+
+    let dir = std::env::temp_dir().join("media-tool-qwen-fallback");
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("sync.png");
+    let _ = std::fs::remove_file(&out);
+
+    let ok = QwenImageProvider
+        .generate("fallback", &out, "test-key", &options_with(addr, Some(true)), &[])
+        .await
+        .expect("an async rejection must not surface as an auth failure");
+    assert!(ok, "the synchronous retry should succeed");
+    assert_eq!(sync_calls.load(Ordering::SeqCst), 1, "exactly one sync retry");
+    assert_eq!(&std::fs::read(&out).unwrap()[..4], b"\x89PNG");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// A genuine 403 (bad key) must still be reported as an authentication failure.
+#[tokio::test]
+async fn a_real_403_is_still_an_auth_failure() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        if let Ok((mut stream, _)) = listener.accept().await {
+            let _ = read_request(&mut stream).await;
+            let body = r#"{"code":"InvalidApiKey","message":"Invalid API-key provided."}"#;
+            let resp = format!(
+                "HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(resp.as_bytes()).await;
+            let _ = stream.flush().await;
+        }
+    });
+
+    let out = std::env::temp_dir().join("media-tool-qwen-bad-key.png");
+    let err = QwenImageProvider
+        .generate("bad key", &out, "wrong-key", &options_with(addr, Some(true)), &[])
+        .await
+        .expect_err("a bad key must still fail loudly");
+    assert!(
+        err.to_string().contains("authentication failed"),
+        "unexpected error: {err}"
+    );
 }

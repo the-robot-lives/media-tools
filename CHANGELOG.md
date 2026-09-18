@@ -11,13 +11,16 @@ are tagged on the original standalone-repo lineage preserved by the subtree squa
   per-request timeout, leaving connection-level defaults (idle-pool retirement, no TCP
   keepalive) to cut a silent wait long before the nominal 180s. New
   `src/providers/http.rs` builds clients with an explicit connect timeout, idle-pool
-  retirement disabled and TCP keepalive on. Version 0.2.0 -> 0.2.1. (2026-09-18)
+  retirement disabled and TCP keepalive on. Version 0.2.0 -> 0.2.2. (2026-09-18)
 
 ### Changed
-- qwen-image now defaults to DashScope **async task mode** (`X-DashScope-Async: enable`
-  plus task polling), so a long render never depends on holding one connection open past a
-  gateway's idle limit. A deployment that answers inline is still handled. Disable with
-  `provider_options: {async: false}` or `MEDIA_QWEN_ASYNC=0`. Tunables:
+- qwen-image supports DashScope **async task mode** (`X-DashScope-Async: enable` plus task
+  polling), as an opt-in via `provider_options: {async: true}` or `MEDIA_QWEN_ASYNC=1`. It
+  is not the default: the multimodal-generation endpoint answers HTTP 403 `AccessDenied`,
+  "current user api does not support asynchronous calls", on the accounts we use, so
+  defaulting it on would make every render fail. When async is enabled and rejected, the
+  provider warns and retries synchronously; a genuine bad-key 403 still fails loudly. A
+  deployment that answers inline is still handled. Tunables:
   `MEDIA_QWEN_TIMEOUT_SECS` (sync ceiling, default 300), `MEDIA_QWEN_POLL_SECS` (default 5),
   `MEDIA_QWEN_POLL_ATTEMPTS` (default 120). (2026-09-18)
 - `provider_options.base_url` overrides DashScope plan/region routing (used by the new

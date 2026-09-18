@@ -33,12 +33,18 @@ fn request_timeout() -> Duration {
         .unwrap_or(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
 }
 
-/// Async task mode (`X-DashScope-Async: enable`) is the default: the render then happens
-/// off a short submit request and is collected by polling, so a long render never depends
-/// on holding one connection open past a gateway's idle limit.
+/// Async task mode (`X-DashScope-Async: enable`) is **opt-in**.
 ///
-/// Disable per prompt with `provider_options: {async: false}` or globally with
-/// `MEDIA_QWEN_ASYNC=0`.
+/// It would be the better shape for a long render \u2014 submit, get a task id in about a
+/// second, poll for the result \u2014 but the multimodal-generation endpoint rejects it on
+/// the accounts we use, with HTTP 403 `AccessDenied`: "current user api does not support
+/// asynchronous calls". Defaulting it on would turn every render into a guaranteed 403.
+/// So the default is the synchronous call over a hardened client, and async is available
+/// for any account entitled to it.
+///
+/// Enable per prompt with `provider_options: {async: true}` or globally with
+/// `MEDIA_QWEN_ASYNC=1`. If the endpoint rejects it, the provider transparently retries
+/// synchronously rather than failing the render.
 fn async_mode(options: &GenerationOptions) -> bool {
     if let Some(v) = options
         .provider_options
@@ -47,7 +53,14 @@ fn async_mode(options: &GenerationOptions) -> bool {
     {
         return v;
     }
-    std::env::var("MEDIA_QWEN_ASYNC").ok().as_deref() != Some("0")
+    std::env::var("MEDIA_QWEN_ASYNC").ok().as_deref() == Some("1")
+}
+
+/// Does this error body mean "this account cannot use async mode" rather than "your key is
+/// bad"? DashScope returns 403 AccessDenied for both, so the message has to disambiguate.
+fn is_async_unsupported(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    lower.contains("asynchronous call") || lower.contains("async call")
 }
 
 /// Pull an image URL out of either response shape: the synchronous multimodal payload or
@@ -125,26 +138,31 @@ impl MediaProvider for QwenImageProvider {
 
         progress::provider_request("qwen-image", &options.model, &api_url, 1);
 
-        let use_async = async_mode(options);
+        let mut use_async = async_mode(options);
+
         // In async mode the connection only has to survive the submit; in sync mode it has
         // to survive the whole render, so the client-level ceiling follows the mode.
-        let total = if use_async {
-            Duration::from_secs(SUBMIT_TIMEOUT_SECS)
-        } else {
-            request_timeout()
+        let submit = |is_async: bool| {
+            let total = if is_async {
+                Duration::from_secs(SUBMIT_TIMEOUT_SECS)
+            } else {
+                request_timeout()
+            };
+            let client = http::client_with_timeout(total);
+            let mut request = client
+                .post(&api_url)
+                .header("Authorization", format!("Bearer {}", api_key))
+                .header("Content-Type", "application/json");
+            if is_async {
+                request = request.header("X-DashScope-Async", "enable");
+            }
+            (client, request.json(&body).timeout(total))
         };
-        let client = http::client_with_timeout(total);
 
-        let mut request = client
-            .post(&api_url)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json");
-        if use_async {
-            request = request.header("X-DashScope-Async", "enable");
-        }
-        let resp = request.json(&body).timeout(total).send().await;
+        let (mut client, request) = submit(use_async);
+        let resp = request.send().await;
 
-        let response = match resp {
+        let mut response = match resp {
             Ok(r) => r,
             Err(e) => {
                 progress::provider_response("qwen-image", 0, false, 1);
@@ -152,6 +170,37 @@ impl MediaProvider for QwenImageProvider {
                 return Ok(false);
             }
         };
+
+        // An account not entitled to async mode answers 403 AccessDenied. That is a
+        // capability answer, not a credential answer \u2014 drop the header and redo the call
+        // synchronously instead of reporting an auth failure.
+        if use_async && response.status().as_u16() == 403 {
+            let body_text = response.text().await.unwrap_or_default();
+            if is_async_unsupported(&body_text) {
+                tel::warn_msg(
+                    "Qwen/DashScope rejected async task mode for this account \u{2014} retrying \
+                     synchronously (set provider_options.async: false to skip this probe)",
+                );
+                use_async = false;
+                let (sync_client, sync_request) = submit(false);
+                client = sync_client;
+                response = match sync_request.send().await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        progress::provider_response("qwen-image", 0, false, 1);
+                        tel::fail_msg(&format!("Network error calling Qwen Image: {}", e));
+                        return Ok(false);
+                    }
+                };
+            } else {
+                progress::provider_response("qwen-image", 403, false, 1);
+                color_eyre::eyre::bail!(
+                    "Qwen/DashScope authentication failed (403): {}\n  Check DASHSCOPE_API_KEY / QWEN_API_KEY / QWEN_TOKEN_KEY",
+                    &body_text[..body_text.len().min(200)]
+                );
+            }
+        }
+        let _ = use_async;
 
         let status = response.status();
         progress::provider_response("qwen-image", status.as_u16(), status.is_success(), 1);

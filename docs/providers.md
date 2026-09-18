@@ -91,14 +91,18 @@ Two things address it:
 * Clients are built through `providers::http`, with an explicit connect timeout, connection
   idle-pool retirement **disabled** and TCP keepalive on, so a silent wait for response
   headers is not dropped beneath the per-request deadline.
-* qwen-image defaults to DashScope **async task mode**: the POST carries
-  `X-DashScope-Async: enable` and returns a `task_id` in about a second, and the result is
-  collected by polling `/api/v1/tasks/<id>`. The render no longer depends on one long
-  connection. A deployment that answers inline anyway is still handled.
+* DashScope **async task mode** is available but **opt-in**. It is the better shape for a
+  long render (submit, get a `task_id` in about a second, poll `/api/v1/tasks/<id>`), but
+  the multimodal-generation endpoint rejects it on the accounts we use, with HTTP 403
+  `AccessDenied` — "current user api does not support asynchronous calls". Defaulting it
+  on would turn every render into a guaranteed 403, so the default is the synchronous call
+  over the hardened client. If async is enabled and the endpoint rejects it, the provider
+  warns and retries synchronously rather than failing, and a genuine bad-key 403 is still
+  reported as an authentication failure. A deployment that answers inline is also handled.
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
-| `provider_options.async` / `MEDIA_QWEN_ASYNC=0` | on | Turn async task mode off (single synchronous request). |
+| `provider_options.async` / `MEDIA_QWEN_ASYNC=1` | off | Opt into async task mode; needs an account entitled to asynchronous calls. |
 | `MEDIA_QWEN_TIMEOUT_SECS` | 300 | Client + request ceiling in synchronous mode. |
 | `MEDIA_QWEN_POLL_SECS` | 5 | Poll interval in async mode. |
 | `MEDIA_QWEN_POLL_ATTEMPTS` | 120 | Poll ceiling (default 10 minutes). |
