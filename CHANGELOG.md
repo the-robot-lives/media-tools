@@ -6,6 +6,25 @@ are tagged on the original standalone-repo lineage preserved by the subtree squa
 
 ## [Unreleased]
 ### Fixed
+- Image-to-image qwen-image renders (reference images, which must use
+  `multimodal-generation` because `text2image` accepts none) now retry a connection the
+  server drops, three attempts by default via `MEDIA_QWEN_RETRIES`. Measured live: a single
+  attempt was cut at 60.9s, and the same call completed at 120.9s once the second attempt
+  went through. Version 0.2.3 -> 0.2.4. (2026-09-18)
+
+### Changed
+- **Correction to the 0.2.3 notes: the ~61s cut is not HTTP/2-specific.** curl pinned to
+  `--http1.1` shows the same close as `Empty reply from server` at 61.1s (after a 200 at
+  55.8s), and this crate cannot negotiate HTTP/2 at all, since the `h2` crate is not in its
+  dependency graph, yet is cut at the same mark. The server closes a synchronous
+  `multimodal-generation` connection at ~61s while one render takes 45-75s depending on load,
+  so it is a coin toss no client setting can win. (2026-09-18)
+- DashScope clients are pinned to HTTP/1.1 (`http1_only`). This is belt-and-braces on a build
+  with no HTTP/2 support, so that enabling an unrelated feature later cannot silently put long
+  renders back on h2. (2026-09-18)
+- Default synchronous ceiling raised 300s -> 360s, above the longest render observed. (2026-09-18)
+
+### Fixed
 - qwen-image renders that take longer than about a minute no longer fail. The
   `multimodal-generation` endpoint is synchronous only on our accounts and has a hard ~61s
   connection ceiling that no client setting avoids: measured live, curl over HTTP/2 failed

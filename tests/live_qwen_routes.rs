@@ -2,23 +2,32 @@
 //! the real endpoint, need a real key, and one of them deliberately waits out a ~60s
 //! server-side cut.
 //!
-//! These exist because the stub-server suite could not have caught the real defect. A local
-//! stub answers whenever we tell it to; the live endpoint has a hard ~61s ceiling on a
-//! synchronous `multimodal-generation` call, which no client setting avoids. Measured:
+//! These exist because the stub-server suite could not have caught the real defect: a local
+//! stub answers whenever we tell it to.
+//!
+//! Measured against the live endpoint, one heavy prompt on `multimodal-generation`:
 //!
 //! | Client | Protocol | Outcome |
 //! |--------|----------|---------|
-//! | curl x3 (loaded service) | HTTP/2 | `Error in the HTTP2 framing layer` at 61.7 / 61.5 / 61.5s |
-//! | this crate (loaded service) | HTTP/1.1 | "error sending request" at ~62s |
-//! | this crate (idle service) x3 | HTTP/1.1 | HTTP 200 at 46.8 / 53.7 / 57.0s |
+//! | curl x3 | HTTP/2 | `Error in the HTTP2 framing layer` at 61.7 / 61.5 / 61.5s |
+//! | curl | HTTP/1.1 | HTTP 200 at 55.8s, then `Empty reply from server` at 61.1s |
+//! | this crate (h1-only) | HTTP/1.1 | cut at 60.9s, then succeeded at 120.9s with one retry |
+//! | this crate x3 | HTTP/1.1 | HTTP 200 at 46.8 / 53.7 / 57.0s |
 //!
-//! Render latency for one heavy prompt swings between roughly 45s and 75s with service load,
-//! so the sync route is a coin toss against the ceiling rather than a reliable path. The same
-//! prompt on the async route finished in 9.6s and 14.9s.
+//! **The cut is not HTTP/2-specific.** That was the working theory for a while, because the
+//! h2 framing error is loud and reproducible; but pinning curl to `--http1.1` only changes how
+//! the same close is reported ("Empty reply from server"), and this crate cannot speak h2 at
+//! all (the `h2` crate is not in the dependency graph) yet is cut at the same 61s mark.
 //!
-//! The fix is not a client knob: it is the async-native `text2image/image-synthesis` route,
-//! which accepts `X-DashScope-Async: enable`, hands back a `task_id` in about a second, and
-//! is collected by polling.
+//! What the numbers actually say: DashScope closes a synchronous `multimodal-generation`
+//! connection at ~61s, and one render's latency straddles that line, swinging between roughly
+//! 45s and 75s with service load. The same request therefore succeeds or dies on a coin toss.
+//! There is no client setting that moves a server-side close, so the mitigations are:
+//!
+//! * prompts without input images use the async-native `text2image/image-synthesis` route,
+//!   which has no such limit and finished the same prompt in 9.6s and 14.9s;
+//! * prompts *with* input images have no async route available, so a dropped connection is
+//!   retried (default 3 attempts, `MEDIA_QWEN_RETRIES`).
 //!
 //! Run them with a key in the environment:
 //!
@@ -190,4 +199,61 @@ fn text2image_model_maps_the_multimodal_default() {
     assert_eq!(text2image_model(""), "qwen-image");
     assert_eq!(text2image_model("qwen-image-plus"), "qwen-image-plus");
     assert_eq!(text2image_model("wan2.2-t2i-flash"), "wan2.2-t2i-flash");
+}
+
+/// The multimodal route driven with a reference image, which is the path the async route
+/// cannot serve: `text2image` accepts no input images, so image-to-image work has to use
+/// `multimodal-generation` \u2014 exactly where the ~61s cut lives.
+///
+/// Measured: a single attempt was cut at 60.9s; with retry enabled the same call completed at
+/// 120.9s, i.e. the first attempt died on the ceiling and the second got through. This test
+/// exercises that retry path end to end.
+#[tokio::test]
+#[ignore = "live: calls DashScope with a reference image, may spend more than one credit"]
+async fn live_multimodal_route_with_a_reference_image_retries_past_the_cut() {
+    use media_tool::attachments::LoadedAttachment;
+    use base64::Engine;
+
+    let options = heavy_options("multimodal");
+    assert_eq!(route_for(&options, true), Route::Multimodal);
+
+    // A small synthetic reference image, so the test carries no fixture.
+    let mut png = Vec::new();
+    {
+        let mut buf = image::RgbaImage::new(512, 512);
+        for (x, y, px) in buf.enumerate_pixels_mut() {
+            let v = ((x / 32 + y / 32) % 2) as u8;
+            *px = image::Rgba([v * 200, 120, 255 - v * 100, 255]);
+        }
+        image::DynamicImage::ImageRgba8(buf)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+    }
+    let attachment = LoadedAttachment {
+        path: "synthetic.png".to_string(),
+        role: "reference".to_string(),
+        mime_type: "image/png".to_string(),
+        description: "checkerboard reference".to_string(),
+        data_b64: base64::engine::general_purpose::STANDARD.encode(&png),
+    };
+
+    let dir = std::env::temp_dir().join("media-tool-live-qwen-img2img");
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("img2img.png");
+    let _ = std::fs::remove_file(&out);
+
+    let started = Instant::now();
+    let result = QwenImageProvider
+        .generate(HEAVY_PROMPT, &out, &key(), &options, &[attachment])
+        .await;
+    let elapsed = started.elapsed();
+    println!("multimodal + reference image (http1): {result:?} after {elapsed:?}");
+
+    let ok = result.expect("the multimodal route must not error");
+    assert!(ok, "the render should have produced an image");
+    let bytes = std::fs::read(&out).expect("an image file should exist");
+    assert_eq!(&bytes[..4], b"\x89PNG");
+    assert!(bytes.len() > 10_000, "suspiciously small image: {} bytes", bytes.len());
+
+    std::fs::remove_dir_all(&dir).ok();
 }
