@@ -1744,7 +1744,7 @@ async fn run_synthesize_prompts(
         .to_string();
     let cleaned = strip_json_fences(&raw);
     let items: Vec<serde_json::Value> =
-        serde_json::from_str(&cleaned).map_err(|e| format!("JSON parse: {e}; raw={}", &cleaned[..cleaned.len().min(200)]))?;
+        serde_json::from_str(&cleaned).map_err(|e| format!("JSON parse: {e}; raw={}", crate::text::truncate(&cleaned, 200)))?;
 
     let sub = out_subdir
         .map(|s| s.trim().trim_start_matches('/').to_string())

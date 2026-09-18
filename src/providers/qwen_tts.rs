@@ -117,7 +117,7 @@ impl MediaProvider for QwenTtsProvider {
             color_eyre::eyre::bail!(
                 "Qwen/DashScope authentication failed ({}): {}\n  Check your DASHSCOPE_API_KEY",
                 status.as_u16(),
-                &body_text[..body_text.len().min(200)]
+                crate::text::truncate(&body_text, 200)
             );
         }
         if !status.is_success() {
@@ -125,7 +125,7 @@ impl MediaProvider for QwenTtsProvider {
             tel::fail_msg(&format!(
                 "Qwen TTS error ({}): {}",
                 status.as_u16(),
-                &body_text[..body_text.len().min(300)]
+                crate::text::truncate(&body_text, 300)
             ));
             return Ok(false);
         }

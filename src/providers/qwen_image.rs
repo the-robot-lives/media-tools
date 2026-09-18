@@ -316,7 +316,7 @@ impl MediaProvider for QwenImageProvider {
                 progress::provider_response("qwen-image", 403, false, 1);
                 color_eyre::eyre::bail!(
                     "Qwen/DashScope authentication failed (403): {}\n  Check DASHSCOPE_API_KEY / QWEN_API_KEY / QWEN_TOKEN_KEY",
-                    &body_text[..body_text.len().min(200)]
+                    crate::text::truncate(&body_text, 200)
                 );
             }
         }
@@ -329,7 +329,7 @@ impl MediaProvider for QwenImageProvider {
             color_eyre::eyre::bail!(
                 "Qwen/DashScope authentication failed ({}): {}\n  Check DASHSCOPE_API_KEY / QWEN_API_KEY / QWEN_TOKEN_KEY",
                 status.as_u16(),
-                &body_text[..body_text.len().min(200)]
+                crate::text::truncate(&body_text, 200)
             );
         }
         if !status.is_success() {
@@ -337,7 +337,7 @@ impl MediaProvider for QwenImageProvider {
             tel::fail_msg(&format!(
                 "Qwen Image error ({}): {}",
                 status.as_u16(),
-                &body_text[..body_text.len().min(300)]
+                crate::text::truncate(&body_text, 300)
             ));
             return Ok(false);
         }
@@ -437,7 +437,7 @@ async fn poll_task(
             color_eyre::eyre::bail!(
                 "Qwen/DashScope authentication failed while polling ({}): {}",
                 status.as_u16(),
-                &body_text[..body_text.len().min(200)]
+                crate::text::truncate(&body_text, 200)
             );
         }
         if !status.is_success() {

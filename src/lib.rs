@@ -31,6 +31,7 @@ pub mod renderers;
 pub mod schema;
 pub mod structural;
 pub mod telemetry;
+pub mod text;
 pub mod test_lab;
 pub mod ui;
 pub mod validate;

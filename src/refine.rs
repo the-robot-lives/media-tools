@@ -209,9 +209,9 @@ fn update_prompt_file(path: &Path, old_text: &str, new_text: &str, feedback: &st
          # [{}] Feedback: \"{}\"\n\
          # [{}] Refined: \"{}\"\n",
         now,
-        &feedback[..feedback.len().min(100)],
+        crate::text::truncate(&feedback, 100),
         now,
-        &new_text[..new_text.len().min(100)]
+        crate::text::truncate(&new_text, 100)
     );
 
     let final_content = if updated.contains("# --- Refinement History ---") {
@@ -220,9 +220,9 @@ fn update_prompt_file(path: &Path, old_text: &str, new_text: &str, feedback: &st
             "{}\n# [{}] Feedback: \"{}\"\n# [{}] Refined: \"{}\"\n",
             trimmed,
             now,
-            &feedback[..feedback.len().min(100)],
+            crate::text::truncate(&feedback, 100),
             now,
-            &new_text[..new_text.len().min(100)]
+            crate::text::truncate(&new_text, 100)
         )
     } else {
         format!("{}{}", updated.trim_end_matches('\n'), history)
