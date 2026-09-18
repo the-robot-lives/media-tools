@@ -39,10 +39,42 @@ This document is the single source of truth for all of those data formats.
 | `requirements` | map | No | — | **Legacy** (v0.1/v0.2): `format`, `dimensions` — migrated into `output` on parse |
 | `attachments` | list | No | `[]` | File references (below) |
 | `depends_on` | list | No | `[]` | DAG dependencies (below) |
-| `post_processing` | list | No | `[]` | Post-gen steps: `{action, params}` (resize, convert, optimize, crop) |
+| `post_processing` | list | No | `[]` | Post-gen steps: `{action, params}` — see [Post-processing steps](#post-processing-steps) |
 | `eval` | map | No | — | Eval section (below) |
 | `tags` | list | No | `[]` | Free-form tags |
 | `product_targets` | list | No | `[]` | Product routing hints |
+
+### Post-processing steps
+
+Each entry is `{action, params}` and runs against every file the prompt produced, in
+order, rewriting the file in place.
+
+| Action | Params | Notes |
+|--------|--------|-------|
+| `crop` | `aspect_ratio` (`"1.91:1"`, `"16:9"`, `"4:3"`, `"1:1"`), `gravity` (`center`\|`top`\|`bottom`\|`left`\|`right`, default `center`), or explicit `width`/`height` | Largest box of the target aspect that fits the source, anchored by gravity. An explicit `width`+`height` box wins over `aspect_ratio`. |
+| `resize` | `width`, `height`, `fit` (`cover`\|`contain`\|`fill`, default `cover`) | `cover` crops to the target aspect (gravity-anchored) then scales to exactly `width`x`height`; `contain` scales to fit inside the box preserving aspect (no padding); `fill` stretches. A single axis preserves aspect. |
+| `render` | `tool` (`mermaid`\|`plantuml`\|`graphviz`\|`puppeteer`), `output_format` | Renders a structural/text output to an image. |
+
+Formats: PNG, JPEG, WebP and GIF; the original extension and encoder are preserved.
+
+An `action` the tool does not implement emits a **warning and fails the run** (non-zero
+exit) rather than reporting success on an unprocessed file. Pass
+`--allow-unimplemented-post` to downgrade that to a warning only.
+
+Example — an exact 1200x630 Open Graph card from a 1024x1024 provider output:
+
+```yaml
+post_processing:
+  - action: crop
+    params:
+      aspect_ratio: "1.91:1"
+      gravity: center
+  - action: resize
+    params:
+      width: 1200
+      height: 630
+      fit: cover
+```
 
 ### `prompt` section
 

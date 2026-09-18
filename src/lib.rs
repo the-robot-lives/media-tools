@@ -22,6 +22,7 @@ pub mod fim;
 pub mod orchestrator;
 pub mod output;
 pub mod pipeline;
+pub mod postprocess;
 pub mod prep;
 pub mod provider_config;
 pub mod providers;

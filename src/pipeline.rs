@@ -11,6 +11,7 @@ use crate::providers::{
     is_stub_provider, resolve_api_key, Candidate, GenerationOptions,
 };
 use crate::refine::interactive_refine_loop;
+use crate::postprocess;
 use crate::renderers;
 use crate::schema::{AssetType, AudioKind, ParsedPrompt, Quality};
 use crate::telemetry as tel;
@@ -33,6 +34,9 @@ pub struct PipelineConfig {
     pub fim_enabled: bool,
     pub eval_url: Option<String>,
     pub eval_model: Option<String>,
+    /// Downgrade unimplemented `post_processing` actions from a hard failure to a warning.
+    /// Off by default: a step the tool cannot perform must not look like success.
+    pub allow_unimplemented_post: bool,
 }
 
 // ⟦𓈎𓄂𓅪𓅙⟧ run_generation :: auto-generated pointer for public function run_generation
@@ -282,6 +286,7 @@ pub async fn run_generation(
 
     let mut succeeded = 0usize;
     let mut failed = 0usize;
+    let mut post_failures: Vec<String> = Vec::new();
     let mut gen_index = 0usize;
 
     for (mut prompt, paths) in plan {
@@ -517,11 +522,46 @@ pub async fn run_generation(
                             }
                         }
                     }
+                    action if postprocess::handles(action) => {
+                        for src in &path_results {
+                            tel::step(&format!(
+                                "Post-processing: {} \u{2192} {}",
+                                action,
+                                src.file_name().unwrap().to_string_lossy()
+                            ));
+                            match postprocess::apply_to_file(src, action, &pp_step.params) {
+                                Ok((w, h)) => {
+                                    tel::ok(&format!(
+                                        "{}: {} is now {}x{}",
+                                        action,
+                                        src.file_name().unwrap().to_string_lossy(),
+                                        w,
+                                        h
+                                    ));
+                                }
+                                Err(e) => {
+                                    let msg = format!(
+                                        "post-processing '{}' failed for {}: {}",
+                                        action,
+                                        src.display(),
+                                        e
+                                    );
+                                    tel::fail_msg(&msg);
+                                    post_failures.push(msg);
+                                }
+                            }
+                        }
+                    }
                     other => {
-                        tel::info(&format!(
-                            "Post-processing: {} (not yet implemented) \u{2014} params: {:?}",
+                        let msg = format!(
+                            "post-processing action '{}' is not implemented \u{2014} output left \
+                             unprocessed (params: {:?})",
                             other, pp_step.params
-                        ));
+                        );
+                        tel::warn_msg(&msg);
+                        if !config.allow_unimplemented_post {
+                            post_failures.push(msg);
+                        }
                     }
                 }
             }
@@ -561,6 +601,15 @@ pub async fn run_generation(
             "Generation failed: 0 outputs written ({} attempt(s) failed). \
              Check API keys and model names (Groq default: openai/gpt-oss-120b).",
             failed
+        );
+    }
+
+    if !post_failures.is_empty() {
+        color_eyre::eyre::bail!(
+            "Post-processing failed ({} step(s)):\n  - {}\n\
+             Pass --allow-unimplemented-post to downgrade unimplemented actions to warnings.",
+            post_failures.len(),
+            post_failures.join("\n  - ")
         );
     }
 
