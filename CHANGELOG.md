@@ -6,6 +6,27 @@ are tagged on the original standalone-repo lineage preserved by the subtree squa
 
 ## [Unreleased]
 ### Fixed
+- qwen-image renders that take longer than about a minute no longer fail. The
+  `multimodal-generation` endpoint is synchronous only on our accounts and has a hard ~61s
+  connection ceiling that no client setting avoids: measured live, curl over HTTP/2 failed
+  three for three at 61.5-61.7s and this crate (HTTP/1.1) failed at ~62s, while on an idle
+  service the same prompt returned 200 at 46.8 / 53.7 / 57.0s. Render latency swings with
+  load, so the sync route was a coin toss against the ceiling. qwen-image now defaults to
+  the async-native `text2image/image-synthesis` route: submit with
+  `X-DashScope-Async: enable`, poll `/api/v1/tasks/<id>`, download. The same heavy prompt
+  completes in 9.6-14.9s. Version 0.2.2 -> 0.2.3. (2026-09-18)
+
+### Changed
+- **The default route changes the model id.** `text2image` rejects `qwen-image-3.0` with 400
+  InvalidParameter, so the route maps the multimodal default onto `qwen-image`.
+  `qwen-image-plus` is also available via `model:`. Pin `provider_options: {route: multimodal}`
+  to stay on `qwen-image-3.0`, accepting the ~60s ceiling. (2026-09-18)
+- Prompts carrying input images stay on `multimodal-generation` automatically; it is the only
+  route that accepts them. (2026-09-18)
+- `MEDIA_DEBUG=1` logs the HTTP client configuration (timeouts, keepalive, HTTP/2 off) at
+  request time. (2026-09-18)
+
+### Fixed
 - qwen-image runs no longer die at ~61s with a bare "Network error calling Qwen Image:
   error sending request". The provider built a bare `reqwest::Client::new()` and set only a
   per-request timeout, leaving connection-level defaults (idle-pool retirement, no TCP

@@ -43,6 +43,14 @@ fn build(total: Option<Duration>) -> reqwest::Client {
         builder = builder.timeout(total);
     }
 
+    if std::env::var("MEDIA_DEBUG").ok().as_deref() == Some("1") {
+        crate::telemetry::info(&format!(
+            "http client: timeout={:?} connect_timeout={:?} pool_idle_timeout=disabled \
+             tcp_keepalive={:?} http2=off (reqwest built with default-features = false)",
+            total, CONNECT_TIMEOUT, TCP_KEEPALIVE
+        ));
+    }
+
     builder.build().unwrap_or_else(|e| {
         // A builder failure here means the TLS backend could not initialise; the plain
         // client would fail the same way on first use, so surface it there instead of

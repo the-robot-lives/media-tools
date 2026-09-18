@@ -79,33 +79,50 @@ post_processing:
 | `udio` | Audio | Todo | P3 | High | `UDIO_API_KEY` |
 | `pika` | Video | Todo | P3 | Medium | `PIKA_API_KEY` |
 
-### qwen-image — long renders and async task mode
+### qwen-image — routes, the ~60s ceiling, and async task mode
 
-`qwen-image-3.0` commonly takes 50-90s at larger sizes. A single held-open connection is
-not a reliable place to wait that long: runs were failing at ~61s with
-`Network error calling Qwen Image: error sending request for url (...)` while the same POST
-succeeded under curl.
+qwen-image reaches DashScope by one of two routes, and they behave very differently.
 
-Two things address it:
+**`multimodal-generation` is synchronous only** on our accounts, and the server closes the
+connection at about 61 seconds. No client setting avoids it — measured against the live
+endpoint with the same heavy prompt:
 
-* Clients are built through `providers::http`, with an explicit connect timeout, connection
-  idle-pool retirement **disabled** and TCP keepalive on, so a silent wait for response
-  headers is not dropped beneath the per-request deadline.
-* DashScope **async task mode** is available but **opt-in**. It is the better shape for a
-  long render (submit, get a `task_id` in about a second, poll `/api/v1/tasks/<id>`), but
-  the multimodal-generation endpoint rejects it on the accounts we use, with HTTP 403
-  `AccessDenied` — "current user api does not support asynchronous calls". Defaulting it
-  on would turn every render into a guaranteed 403, so the default is the synchronous call
-  over the hardened client. If async is enabled and the endpoint rejects it, the provider
-  warns and retries synchronously rather than failing, and a genuine bad-key 403 is still
-  reported as an authentication failure. A deployment that answers inline is also handled.
+| Client | Protocol | Outcome |
+|--------|----------|---------|
+| curl x3, loaded service | HTTP/2 | `Error in the HTTP2 framing layer` at 61.7 / 61.5 / 61.5s |
+| this crate, loaded service | HTTP/1.1 | "error sending request" at ~62s |
+| this crate x3, idle service | HTTP/1.1 | HTTP 200 at 46.8 / 53.7 / 57.0s |
+
+Render latency for one prompt swings roughly between 45s and 75s with service load, so this
+route is a coin toss against the ceiling rather than a path that can be tuned. The route also
+answers HTTP 403 `AccessDenied` — "current user api does not support asynchronous calls"
+— to the async header, so async is not available on it. It is still the **only** route that
+accepts input images, so prompts with attachments use it automatically.
+
+**`text2image/image-synthesis` is async-native**, and is now the default when a prompt has no
+input images. The POST carries `X-DashScope-Async: enable` and returns a `task_id` in about a
+second; the result is collected by polling `/api/v1/tasks/<id>` and downloading the result
+URL. The same heavy prompt that sits on the ceiling synchronously finished here in 9.6s and
+14.9s.
+
+> **The default route changes the model id.** `text2image` rejects `qwen-image-3.0` with 400
+> `InvalidParameter`, so the route maps the multimodal default onto `qwen-image`;
+> `qwen-image-plus` is also accepted and can be pinned with `model:`. If you need
+> `qwen-image-3.0` specifically, set `provider_options: {route: multimodal}` and accept the
+> ~60s ceiling.
+
+Clients are built through `providers::http` with an explicit connect timeout, connection
+idle-pool retirement disabled and TCP keepalive on. That removes the hidden ceilings beneath
+the per-request deadline; it does not and cannot defeat a server-side close.
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
-| `provider_options.async` / `MEDIA_QWEN_ASYNC=1` | off | Opt into async task mode; needs an account entitled to asynchronous calls. |
+| `provider_options.route` | `text2image`, or `multimodal` when the prompt has input images | Force a route: `text2image` / `multimodal`. |
+| `provider_options.async` / `MEDIA_QWEN_ASYNC=1\|0` | on for text2image, off for multimodal | Override async task mode. A route that rejects async on capability grounds falls back to a synchronous call. |
 | `MEDIA_QWEN_TIMEOUT_SECS` | 300 | Client + request ceiling in synchronous mode. |
 | `MEDIA_QWEN_POLL_SECS` | 5 | Poll interval in async mode. |
 | `MEDIA_QWEN_POLL_ATTEMPTS` | 120 | Poll ceiling (default 10 minutes). |
+| `MEDIA_DEBUG=1` | off | Log the HTTP client configuration at request time. |
 | `provider_options.base_url` | plan/region | Override the DashScope API root. |
 
 | `kling` | Video | Todo | P3 | Medium | `KLING_API_KEY` |
