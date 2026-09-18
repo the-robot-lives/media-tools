@@ -1,6 +1,6 @@
 [package]
 name = "generate-media-prompt"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Generate media assets from .media.prompt YAML files"
 
@@ -26,6 +26,7 @@ crossterm = { version = "0.28", features = ["event-stream"] }
 indicatif = "0.17"
 dialoguer = "0.11"
 mime_guess = "2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 futures = "0.3"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["multipart"] }
@@ -37,6 +38,7 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 
 [dev-dependencies]
 insta = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [profile.release]
 strip = true

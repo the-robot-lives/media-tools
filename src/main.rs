@@ -85,6 +85,10 @@ struct Cli {
     #[arg(long)]
     no_fim: bool,
 
+    /// Treat unimplemented post_processing actions as warnings instead of a failed run
+    #[arg(long)]
+    allow_unimplemented_post: bool,
+
     /// Override eval endpoint base URL
     #[arg(long, value_name = "URL")]
     eval_url: Option<String>,
@@ -224,6 +228,7 @@ async fn main() -> color_eyre::Result<()> {
         fim_enabled,
         eval_url: cli.eval_url,
         eval_model: cli.eval_model,
+        allow_unimplemented_post: cli.allow_unimplemented_post,
     };
 
     orchestrator::run_generation(prompts, &config).await?;

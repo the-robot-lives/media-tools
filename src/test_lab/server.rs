@@ -1162,6 +1162,7 @@ async fn run_generate_job(
         fim_enabled: std::env::var("MEDIA_FIM_INJECT").ok().as_deref() != Some("0"),
         eval_url: None,
         eval_model: None,
+        allow_unimplemented_post: false,
     };
     pipeline::run_generation(vec![prompt], &config)
         .await

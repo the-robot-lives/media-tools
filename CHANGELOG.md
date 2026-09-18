@@ -5,6 +5,16 @@ Tags follow `utilities-agent-media-tool/<milestone>`; pre-import milestones (m1â
 are tagged on the original standalone-repo lineage preserved by the subtree squash.
 
 ## [Unreleased]
+### Added
+- `post_processing` actions `crop` and `resize` are implemented (`src/postprocess.rs`):
+  gravity-anchored aspect crop, and `cover`/`contain`/`fill` resize, applied in place to
+  PNG/JPEG/WebP/GIF outputs. Version bumped 0.1.0 â†’ 0.2.0. (2026-09-18)
+
+### Changed
+- An unimplemented `post_processing` action now warns and fails the run (non-zero exit)
+  instead of printing an informational "not yet implemented" line and exiting 0. The new
+  `--allow-unimplemented-post` flag restores the lenient behaviour. (2026-09-18)
+
 - Added `docs/PROJ-FAQ.md` + summary (motivation/fit/comparison/capability/caveats/trust Q&A) (2026-07-17)
 - Added `docs/PROJ-HOWTO.md` + summary and `docs/howto/` (first-hour, FIM rich-format usage, common-error troubleshooting) (2026-07-17)
 - Added `docs/PROJ-ARCH.md` + summary; refreshed `docs/PROJ-LAYOUT.md` and `docs/layout/src.md` (2026-07-16)

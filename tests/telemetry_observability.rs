@@ -116,6 +116,7 @@ async fn a_subscriber_observes_a_run_without_a_terminal() {
         fim_enabled: false,
         eval_url: None,
         eval_model: None,
+        allow_unimplemented_post: false,
     };
 
     pipeline::run_generation(vec![prompt], &config)
