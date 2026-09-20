@@ -259,8 +259,18 @@ pub fn apply_to_file(
     action: &str,
     params: &Params,
 ) -> color_eyre::Result<(u32, u32)> {
-    let img = image::open(path)
-        .wrap_err_with(|| format!("post-processing '{}': cannot decode {}", action, path.display()))?;
+    // Decode by *content*, not by extension. A provider may hand back a container other than
+    // the one the prompt declared, and `image::open` guesses from the file name.
+    let img = image::ImageReader::open(path)
+        .wrap_err_with(|| format!("post-processing '{}': cannot open {}", action, path.display()))?
+        .with_guessed_format()
+        .wrap_err_with(|| {
+            format!("post-processing '{}': cannot read {}", action, path.display())
+        })?
+        .decode()
+        .wrap_err_with(|| {
+            format!("post-processing '{}': cannot decode {}", action, path.display())
+        })?;
 
     let out = match action {
         "crop" => apply_crop(&img, params)?,

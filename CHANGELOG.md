@@ -6,6 +6,21 @@ are tagged on the original standalone-repo lineage preserved by the subtree squa
 
 ## [Unreleased]
 ### Fixed
+- A prompt declaring `format: png` no longer ships JPEG bytes in a `.png` file. The gemini
+  image provider returns JPEG whatever the prompt declares; the tool wrote those bytes to the
+  declared path, reported generation success, and post-processing then failed with "cannot
+  decode" — the only honest signal arrived a step too late. Image bytes are now identified by
+  magic number and reconciled with the requested extension (`src/imagefmt.rs`): transcoded
+  when possible, written under their true extension with a warning when not. Version
+  0.2.5 -> 0.2.6. (2026-09-21)
+- Post-processing decodes by content instead of by file extension, so a mislabelled file from
+  any source is handled rather than reported as corrupt. (2026-09-21)
+
+### Added
+- `provider_options.base_url` overrides the gemini API root, which is how the new
+  stubbed-provider test drives the real provider. (2026-09-21)
+
+### Fixed
 - The tool no longer panics while truncating text for display. Every preview of a string the
   tool does not control (eval notes, provider error bodies, raw LLM replies) used
   `&s[..s.len().min(n)]`, which indexes bytes and panics when the index lands inside a
