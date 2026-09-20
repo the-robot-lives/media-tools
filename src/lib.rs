@@ -19,6 +19,7 @@ pub mod attachments;
 pub mod dag;
 pub mod eval;
 pub mod fim;
+pub mod imagefmt;
 pub mod orchestrator;
 pub mod output;
 pub mod pipeline;

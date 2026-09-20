@@ -5,6 +5,7 @@ use base64::Engine;
 use serde_json::json;
 
 use crate::attachments::LoadedAttachment;
+use crate::imagefmt;
 use crate::providers::{GenerationOptions, MediaProvider};
 use crate::telemetry as tel;
 use crate::telemetry::progress;
@@ -17,6 +18,57 @@ const INITIAL_BACKOFF_SECS: u64 = 2;
 const GENERATE_CONTENT_MODEL: &str = "gemini-3.1-flash-image";
 
 pub struct GeminiProvider;
+
+
+/// Gemini API root. `provider_options.base_url` overrides it, which is how the tests point the
+/// provider at a stub server; it also serves as an escape hatch for a proxy or mirror.
+fn api_root(options: &GenerationOptions) -> String {
+    options
+        .provider_options
+        .get("base_url")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim_end_matches('/'))
+        .filter(|s| !s.is_empty())
+        .unwrap_or("https://generativelanguage.googleapis.com")
+        .to_string()
+}
+
+/// Write provider bytes so the file's contents match its name.
+///
+/// Gemini returns JPEG whatever `output.format` a prompt declares. Writing those bytes to a
+/// `.png` path used to report success and then break post-processing one step later with
+/// "cannot decode". Transcode to what was asked for, and if that is impossible, write under
+/// the true extension and say so.
+fn write_reconciled(output_path: &Path, bytes: &[u8]) -> color_eyre::Result<std::path::PathBuf> {
+    let (written, outcome) = imagefmt::write_image_reconciled(output_path, bytes)?;
+    match outcome {
+        imagefmt::WriteOutcome::AsRequested => {}
+        imagefmt::WriteOutcome::Transcoded { from, to } => {
+            tel::verbose(&format!(
+                "Gemini returned {:?}; transcoded to {:?} as declared by the prompt",
+                from, to
+            ));
+        }
+        imagefmt::WriteOutcome::Renamed { ref to, kind } => {
+            tel::warn_msg(&format!(
+                "Gemini returned {:?}, which cannot be written as '{}' \u{2014} wrote {} instead",
+                kind,
+                output_path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("(none)"),
+                to.display()
+            ));
+        }
+        imagefmt::WriteOutcome::Unknown => {
+            tel::warn_msg(&format!(
+                "Gemini returned bytes in an unrecognised container; wrote {} verbatim",
+                written.display()
+            ));
+        }
+    }
+    Ok(written)
+}
 
 #[async_trait::async_trait]
 impl MediaProvider for GeminiProvider {
@@ -92,8 +144,10 @@ impl GeminiProvider {
         options: &GenerationOptions,
     ) -> color_eyre::Result<bool> {
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:predict?key={}",
-            options.model, api_key
+            "{}/v1beta/models/{}:predict?key={}",
+            api_root(options),
+            options.model,
+            api_key
         );
 
         let mut params = json!({ "sampleCount": 1 });
@@ -159,10 +213,7 @@ impl GeminiProvider {
         }
 
         let image_bytes = base64::engine::general_purpose::STANDARD.decode(image_b64)?;
-        if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(output_path, &image_bytes)?;
+        write_reconciled(output_path, &image_bytes)?;
         Ok(true)
     }
 
@@ -182,8 +233,10 @@ impl GeminiProvider {
             .unwrap_or(&options.model);
 
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            model, api_key
+            "{}/v1beta/models/{}:generateContent?key={}",
+            api_root(options),
+            model,
+            api_key
         );
 
         let mut parts: Vec<serde_json::Value> = Vec::new();
@@ -252,10 +305,7 @@ impl GeminiProvider {
                     if !image_b64.is_empty() {
                         let image_bytes =
                             base64::engine::general_purpose::STANDARD.decode(image_b64)?;
-                        if let Some(parent) = output_path.parent() {
-                            std::fs::create_dir_all(parent)?;
-                        }
-                        std::fs::write(output_path, &image_bytes)?;
+                        write_reconciled(output_path, &image_bytes)?;
                         return Ok(true);
                     }
                 }

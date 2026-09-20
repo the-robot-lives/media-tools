@@ -141,6 +141,26 @@ putting long renders back on h2.
 | `MEDIA_DEBUG=1` | off | Log the HTTP client configuration at request time. |
 | `provider_options.base_url` | plan/region | Override the DashScope API root. |
 
+### Providers may not return the format you declared
+
+`output.format` is a request, not a guarantee. The gemini image provider returns **JPEG**
+whatever the prompt declares. Writing those bytes straight to a `.png` path produced a file
+whose name lied about its contents: the run reported success and post-processing failed one
+step later with "cannot decode".
+
+Image bytes are now sniffed by magic number on the way in and reconciled with the requested
+extension:
+
+| Situation | Behaviour |
+|-----------|-----------|
+| Bytes match the declared extension | Written as-is. |
+| Bytes differ and can be re-encoded | Transcoded to the declared format; noted in verbose output. |
+| Bytes differ and cannot be re-encoded | Written under their true extension, with a warning. |
+| Container not recognised | Written verbatim, with a warning. |
+
+Post-processing decodes by content rather than by file name, so a mislabelled file from any
+source is still handled.
+
 ### qwen content filter refusals can be lexical
 
 A refusal is not always about the image being asked for. The filter also reads the brief's
