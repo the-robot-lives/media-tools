@@ -147,6 +147,7 @@ Untagged union:
 | `version` | u32 | Config format version (`1`) |
 | `defaults` | map | service → default model id |
 | `image_tiers` | map | `low`/`medium`/`high` → ordered `"service:model"` ladder, best-first; bare ids treated as gemini; **replaces** built-in ladder for that tier |
+| `chat_tiers` | map | Same shape as `image_tiers`, for chat/text assets (component, html, document, …); overrides the compiled-in chat ladder for that tier |
 | `max_prompt_chars` | map | service → max prompt character limit |
 | `refine_model` | string | Chat model for the refine loop |
 | `prompt_guidance` | map | service → prompt-guidance doc path (relative to solutions dir) |
@@ -222,6 +223,10 @@ Slug inference from path: `prompts/fim/<generator>/x.media.prompt` →
 | `MEDIA_EVAL_API_KEY` / `MEDIA_EVAL_BASE_URL` / `MEDIA_EVAL_MODEL` / `MEDIA_EVAL_TIMEOUT` | Eval LLM endpoint override |
 | `MEDIA_PREP_API_KEY` / `MEDIA_PREP_BASE_URL` / `MEDIA_PREP_MODEL` | Prompt-prep LLM endpoint override |
 | `MEDIA_FIM_DIR` / `MEDIA_FIM_INJECT` | FIM solution dir / injection toggle |
+| `MEDIA_DEBUG` | Set to `1` to dump raw provider HTTP request/response bodies for debugging |
+| `MEDIA_QWEN_ASYNC` | Force DashScope qwen-image sync/async routing (`1`/`0`) |
+| `MEDIA_QWEN_RETRIES` | Submit retries for qwen-image generation (default 2) |
+| `MEDIA_QWEN_TIMEOUT_SECS` / `MEDIA_QWEN_POLL_SECS` / `MEDIA_QWEN_POLL_ATTEMPTS` | Per-attempt timeout, poll interval, and poll-attempt cap for async qwen-image jobs |
 | `GROQ_VISION_MODEL` | Vision model override for eval scoring |
 | `INFRA_ROOT` | Monorepo root hint (bin/ wrapper) |
 

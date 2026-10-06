@@ -2,10 +2,11 @@
 
 ## Overview
 
-media-tool generates media assets from declarative YAML `.media.prompt` files (schema v0.4). Authors declare intent (asset type, quality tier, prompt, eval criteria); the tool handles provider auto-selection, dependency-DAG ordering, generation across 16 provider APIs, markup rendering, LLM eval grading with provider fallback, and interactive refinement. Primary implementation: Rust binary `generate-media-prompt` (clap/tokio/ratatui) installed to `~/.local/bin`; legacy bash+Python engine kept as no-cargo fallback. Repo also ships a Phoenix+Hologram landing site (`web/`, helm `media-tool-landing`) and a local test-lab web server (`src/test_lab/`).
+media-tool generates media assets from declarative YAML `.media.prompt` files (schema v0.4). Authors declare intent (asset type, quality tier, prompt, eval criteria); the tool handles provider auto-selection, dependency-DAG ordering, generation across 16 provider APIs, markup rendering, post-processing (crop/resize), LLM eval grading with provider fallback, and interactive refinement. Primary implementation: Rust library (`lib.rs`) + `generate-media-prompt` CLI (clap/tokio/ratatui) installed to `~/.local/bin`; legacy bash+Python engine kept as no-cargo fallback. Repo also ships a Phoenix+Hologram landing site (`web/`, helm `media-tool-landing`), a local test-lab web server (`src/test_lab/`), and an in-progress SwiftUI macOS app (`macos/MediaWorkbench`, tobor-kit; no Rust FFI yet).
 
 ## Core Components
 
+- `lib.rs` + `orchestrator.rs` — library surface + run orchestration, shared by all front-ends
 - `main.rs` — CLI entry, input resolution, dispatch
 - `schema.rs` — YAML parsing, legacy v0.1–v0.3 normalization
 - `provider_config.rs` — runtime `media-tool.yaml` overrides (defaults, tiers, limits)
@@ -14,12 +15,15 @@ media-tool generates media assets from declarative YAML `.media.prompt` files (s
 - `pipeline.rs` — orchestration, dry-run, quality→provider selection
 - `providers/` — 16 implementations: image (Gemini Imagen, Qwen image, DashScope, ZAI), music/SFX (Suno), TTS (OpenAI, ElevenLabs, Qwen), video (Grok, Veo, Wan), chat (Gemini, Anthropic, OpenAI, Groq, OpenRouter, LiteLLM/ZAI)
 - `renderers/` — Mermaid, PlantUML, Graphviz, Puppeteer (markup → visual)
+- `postprocess.rs` + `imagefmt.rs` — crop/resize post-processing; image format reconciliation by magic number
+- `telemetry.rs` + `term_layer.rs` — tracing-event progress; CLI terminal subscriber
 - `test_lab/` — local browser lab server (catalog, settings, workspace persistence)
 - `eval.rs` — weighted-criteria vision grading (Qwen 3.6), drives provider fallback
 - `refine.rs` / `prep.rs` / `validate.rs` — feedback loop, prompt expansion, SVG lint auto-fix
 - `bin/` + `lib/` — legacy bash wrapper (k8-lib) and Python engine; `media-eval-port-forward` kubectl helper
 - `web/` + `helm/` — Phoenix+Hologram landing/docs site and its deploy chart
-- `skill/content-media-engine/` — Claude Code skill packaging; `demos/` — working examples per asset type (10 kinds)
+- `macos/MediaWorkbench/` — SwiftUI desktop app (Settings→Keys slice; FFI pending)
+- `skill/content-media-engine/` — Claude Code skill packaging; `demos/` — working examples per asset type (11 kinds)
 
 ## Provider Architecture
 
@@ -53,7 +57,9 @@ Parse/normalize → resolve depends_on DAG (cycles abort) → generate tier by t
 - Cross-file dependency DAG as first-class batch model
 - Eval-gated generation with graceful degradation when no evaluator reachable
 - Renderers as post-transforms, separate from generation providers
+- Library-first split (`lib.rs`/`orchestrator.rs`/`telemetry.rs`) so CLI, test lab, and macOS app share one engine
+- Unknown post-processing actions fail the run (`--allow-unimplemented-post` downgrades)
 
 ## Known Gaps
 
-Post-processing actions stubbed; within-tier parallelism, inline/context collapse substitution, and several image providers still planned.
+Implemented post-processing: crop, resize, render. `collapse: inline`/`context` substitution and within-tier parallelism parsed but not wired. macOS app is a first slice (no FFI; Library/Runs screens placeholder).
