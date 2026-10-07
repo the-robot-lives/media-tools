@@ -6,6 +6,8 @@ name: Nightly
 # Live provider tests (tests/live_qwen_routes.rs) cost API credits and stay manual.
 
 on:
+  push:
+    branches: [stage]
   schedule:
     - cron: "17 7 * * *"
   workflow_dispatch:
