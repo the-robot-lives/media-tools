@@ -16,7 +16,7 @@ pub enum Quality {
 }
 
 impl Quality {
-    // ⟦𓋧𓏍𓁬𓋟⟧ as_str :: auto-generated pointer for public function as_str
+    // <REMOVED UUID HERE> as_str :: auto-generated pointer for public function as_str
     pub fn as_str(&self) -> &'static str {
         match self {
             Quality::Low => "low",
@@ -212,7 +212,7 @@ pub enum DependencyRef {
 }
 
 impl DependencyRef {
-    // ⟦𓌥𓄵𓃛𓇴⟧ ref_id :: auto-generated pointer for public function ref_id
+    // <REMOVED UUID HERE> ref_id :: auto-generated pointer for public function ref_id
     pub fn ref_id(&self) -> &str {
         match self {
             DependencyRef::Simple(s) => s,
@@ -254,13 +254,13 @@ pub struct EvalSection {
 }
 
 impl EvalSection {
-    // ⟦𓃃𓊰𓂨𓅮⟧ effective_pass_threshold :: auto-generated pointer for public function effective_pass_threshold
+    // <REMOVED UUID HERE> effective_pass_threshold :: auto-generated pointer for public function effective_pass_threshold
     pub fn effective_pass_threshold(&self) -> f64 {
         self.pass_threshold.unwrap_or(0.7)
     }
 
     /// Normalized eval mode: llm | structural | hybrid.
-    // ⟦𓅗𓃾𓅞𓈫⟧ effective_mode :: Normalized eval mode: llm | structural | hybrid.
+    // <REMOVED UUID HERE> effective_mode :: Normalized eval mode: llm | structural | hybrid.
     pub fn effective_mode(&self) -> &str {
         match self.mode.as_deref().map(|s| s.trim().to_lowercase()) {
             Some(ref m) if m == "structural" || m == "struct" => "structural",
@@ -270,7 +270,7 @@ impl EvalSection {
         }
     }
 
-    // ⟦𓉸𓀍𓊓𓅗⟧ wants_visual :: auto-generated pointer for public function wants_visual
+    // <REMOVED UUID HERE> wants_visual :: auto-generated pointer for public function wants_visual
     pub fn wants_visual(&self) -> bool {
         self.visual.unwrap_or(false)
     }
@@ -328,7 +328,7 @@ pub enum AssetType {
 }
 
 impl AssetType {
-    // ⟦𓋝𓃬𓅔𓇴⟧ from_extension :: auto-generated pointer for public function from_extension
+    // <REMOVED UUID HERE> from_extension :: auto-generated pointer for public function from_extension
     pub fn from_extension(ext: &str) -> Self {
         match ext.to_lowercase().as_str() {
             "png" | "jpg" | "jpeg" | "svg" | "webp" => AssetType::Image,
@@ -339,7 +339,7 @@ impl AssetType {
         }
     }
 
-    // ⟦𓏤𓍞𓈋𓇗⟧ from_type_str :: auto-generated pointer for public function from_type_str
+    // <REMOVED UUID HERE> from_type_str :: auto-generated pointer for public function from_type_str
     pub fn from_type_str(s: &str) -> (Self, AudioKind) {
         match s {
             "image" => (AssetType::Image, AudioKind::Voice),
@@ -357,7 +357,7 @@ impl AssetType {
         }
     }
 
-    // ⟦𓏌𓎳𓈔𓏍⟧ default_extension :: auto-generated pointer for public function default_extension
+    // <REMOVED UUID HERE> default_extension :: auto-generated pointer for public function default_extension
     pub fn default_extension(&self) -> &str {
         match self {
             AssetType::Image => "png",
@@ -375,7 +375,7 @@ impl AssetType {
 
     /// True for chat-based generation types. Unrecognised `type` values land on
     /// `Unknown` and are treated as generic text assets rather than media.
-    // ⟦𓈡𓏣𓄓𓌨⟧ is_chat_type :: True for chat-based generation types.
+    // <REMOVED UUID HERE> is_chat_type :: True for chat-based generation types.
     pub fn is_chat_type(&self) -> bool {
         matches!(
             self,
@@ -404,7 +404,7 @@ pub struct ParsedPrompt {
 // Public helpers
 // ---------------------------------------------------------------------------
 
-// ⟦𓂹𓋁𓌻𓊆⟧ is_media_prompt :: auto-generated pointer for public function is_media_prompt
+// <REMOVED UUID HERE> is_media_prompt :: auto-generated pointer for public function is_media_prompt
 pub fn is_media_prompt(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
@@ -412,7 +412,7 @@ pub fn is_media_prompt(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-// ⟦𓐃𓆵𓈓𓃵⟧ parse_prompt_file :: auto-generated pointer for public function parse_prompt_file
+// <REMOVED UUID HERE> parse_prompt_file :: auto-generated pointer for public function parse_prompt_file
 pub fn parse_prompt_file(path: &Path) -> color_eyre::Result<ParsedPrompt> {
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let content = std::fs::read_to_string(&path)

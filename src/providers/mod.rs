@@ -87,7 +87,7 @@ pub struct Candidate {
 
 /// Returns candidates ordered best-first for the given asset type / audio kind / quality tier.
 /// The list is NOT filtered by API-key availability — call `available()` to filter.
-// ⟦𓄃𓉞𓅍𓍺⟧ candidates_for :: Returns candidates ordered best-first for the given asset type / audio kind / quality tier.
+// <REMOVED UUID HERE> candidates_for :: Returns candidates ordered best-first for the given asset type / audio kind / quality tier.
 pub fn candidates_for(
     asset_type: AssetType,
     audio_kind: AudioKind,
@@ -283,7 +283,7 @@ fn chat_candidates_with(
 }
 
 /// Returns true if the candidate's required API key env var is set and non-empty.
-// ⟦𓀖𓂿𓎇𓃟⟧ available :: Returns true if the candidate's required API key env var is set and non-empty.
+// <REMOVED UUID HERE> available :: Returns true if the candidate's required API key env var is set and non-empty.
 pub fn available(c: &Candidate) -> bool {
     resolve_api_key(c.service).is_some()
 }
@@ -303,7 +303,7 @@ pub fn resolve_api_key(service: &str) -> Option<String> {
 // Provider factory helpers
 // ---------------------------------------------------------------------------
 
-// ⟦𓉢𓀡𓂟𓅼⟧ get_provider :: auto-generated pointer for public function get_provider
+// <REMOVED UUID HERE> get_provider :: auto-generated pointer for public function get_provider
 pub fn get_provider(service: &str) -> Option<Box<dyn MediaProvider>> {
     match service {
         "gemini" => Some(Box::new(gemini::GeminiProvider)),
@@ -319,7 +319,7 @@ pub fn get_provider(service: &str) -> Option<Box<dyn MediaProvider>> {
     }
 }
 
-// ⟦𓐥𓄗𓈥𓉨⟧ get_chat_provider :: auto-generated pointer for public function get_chat_provider
+// <REMOVED UUID HERE> get_chat_provider :: auto-generated pointer for public function get_chat_provider
 pub fn get_chat_provider(service: &str) -> Option<Box<dyn ChatProvider>> {
     match service {
         "anthropic" => Some(Box::new(anthropic::AnthropicProvider)),
@@ -334,7 +334,7 @@ pub fn get_chat_provider(service: &str) -> Option<Box<dyn ChatProvider>> {
     }
 }
 
-// ⟦𓃢𓅓𓂩𓇩⟧ is_stub_provider :: auto-generated pointer for public function is_stub_provider
+// <REMOVED UUID HERE> is_stub_provider :: auto-generated pointer for public function is_stub_provider
 pub fn is_stub_provider(service: &str) -> bool {
     !matches!(
         service,
@@ -360,7 +360,7 @@ pub fn is_stub_provider(service: &str) -> bool {
     )
 }
 
-// ⟦𓆌𓉭𓈳𓐮⟧ api_key_env :: auto-generated pointer for public function api_key_env
+// <REMOVED UUID HERE> api_key_env :: auto-generated pointer for public function api_key_env
 pub fn api_key_env(service: &str) -> &'static str {
     match service {
         "gemini" | "veo" => "GEMINI_API_KEY",
@@ -379,7 +379,7 @@ pub fn api_key_env(service: &str) -> &'static str {
     }
 }
 
-// ⟦𓄫𓁗𓆙𓐧⟧ sanitize_chat_output :: auto-generated pointer for public function sanitize_chat_output
+// <REMOVED UUID HERE> sanitize_chat_output :: auto-generated pointer for public function sanitize_chat_output
 pub fn sanitize_chat_output(raw: &str, output_path: &Path) -> String {
     let mut text = raw.trim().to_string();
 
@@ -446,7 +446,7 @@ pub struct ProviderConstraints {
     pub max_prompt_chars: Option<usize>,
 }
 
-// ⟦𓋠𓃽𓁒𓉵⟧ constraints :: auto-generated pointer for public function constraints
+// <REMOVED UUID HERE> constraints :: auto-generated pointer for public function constraints
 pub fn constraints(service: &str) -> ProviderConstraints {
     // YAML override (media-tool.yaml max_prompt_chars) wins over the built-in table
     if let Some(cfg) = crate::provider_config::loaded() {
@@ -480,7 +480,7 @@ pub fn constraints(service: &str) -> ProviderConstraints {
     }
 }
 
-// ⟦𓐧𓉱𓍻𓉋⟧ default_model :: auto-generated pointer for public function default_model
+// <REMOVED UUID HERE> default_model :: auto-generated pointer for public function default_model
 pub fn default_model(service: &str) -> &'static str {
     // YAML override (media-tool.yaml defaults) wins over the built-in table
     if let Some(cfg) = crate::provider_config::loaded() {

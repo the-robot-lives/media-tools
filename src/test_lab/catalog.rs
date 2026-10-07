@@ -60,7 +60,7 @@ pub struct PromptDetail {
     pub eval_yaml: Option<String>,
 }
 
-// ⟦𓏗𓋃𓍝𓈅⟧ type_label :: auto-generated pointer for public function type_label
+// <REMOVED UUID HERE> type_label :: auto-generated pointer for public function type_label
 pub fn type_label(type_key: &str) -> &'static str {
     match type_key {
         "image" => "Image (raster)",
@@ -108,7 +108,7 @@ fn display_type_key(yaml_type: &str, rel_path: &str, text_format: Option<&str>) 
     }
 }
 
-// ⟦𓈧𓎂𓄔𓇺⟧ scan_catalog :: auto-generated pointer for public function scan_catalog
+// <REMOVED UUID HERE> scan_catalog :: auto-generated pointer for public function scan_catalog
 pub fn scan_catalog(demos_dir: &Path, workspace_dir: &Path) -> color_eyre::Result<Vec<TypeGroup>> {
     let mut by_type: BTreeMap<String, Vec<PromptSummary>> = BTreeMap::new();
 
@@ -369,7 +369,7 @@ fn output_entry(
     }
 }
 
-// ⟦𓌀𓁼𓁵𓁣⟧ load_detail :: auto-generated pointer for public function load_detail
+// <REMOVED UUID HERE> load_detail :: auto-generated pointer for public function load_detail
 pub fn load_detail(path: &Path, media_root: &Path, source: &str) -> color_eyre::Result<PromptDetail> {
     let summary = summarize_prompt(path, media_root, source)?;
     let yaml = std::fs::read_to_string(path)?;
@@ -429,7 +429,7 @@ fn pathdiff_rel(path: &Path, root: &Path) -> String {
 }
 
 /// Minimal path query encoding (encode special chars).
-// ⟦𓄆𓆣𓁥𓌨⟧ urlencoding_path :: Minimal path query encoding (encode special chars).
+// <REMOVED UUID HERE> urlencoding_path :: Minimal path query encoding (encode special chars).
 pub fn urlencoding_path(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 2);
     for b in s.bytes() {
@@ -449,7 +449,7 @@ pub fn urlencoding_path(s: &str) -> String {
 /// - workspace-relative (`prompts/fim/…`)
 /// - demos-relative (`image/…` or `demos/image/…`)
 /// - absolute paths under demos_dir or workspace_dir
-// ⟦𓅃𓊑𓌕𓊶⟧ resolve_safe_media :: Resolve a media path query to an absolute file under allowed roots.
+// <REMOVED UUID HERE> resolve_safe_media :: Resolve a media path query to an absolute file under allowed roots.
 pub fn resolve_safe_media(
     raw: &str,
     demos_dir: &Path,
