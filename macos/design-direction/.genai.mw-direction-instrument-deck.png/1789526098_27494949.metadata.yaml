@@ -1,0 +1,9 @@
+service: gemini
+model: gemini-3-pro-image
+timestamp: 1789526120
+eval_score: 0.870
+eval_notes: "Faithful to the brief: near-black #0B0E12 panels, teal #4FD1C5 accents on the progress bar, meters and Generate button, a single amber warning triangle by the TEMP readout, monospace numeric readouts, left queue sidebar, centre active panel with progress + elapsed/estimated time, right rail vertical meters. macOS framing is correct (traffic lights, Apple menu bar, status bar with clock/wifi/battery). Reads clearly as a pro-audio workstation at a glance. Minor: image is a multi-crop composite rat"
+prompt: |
+  A macOS desktop application window, dark professional interface like a pro audio workstation. Left sidebar listing queued generation runs. Centre: a large active panel with a progress bar and elapsed time. Right rail: vertical meters and numeric readouts in monospace. Near-black #0B0E12 panels, teal #4FD1C5 accents, one amber warning indicator. Flat surfaces, faint panel seams, subtle glow on active elements.
+negative: |
+  garbled text, lorem ipsum, watermark, logo, photorealistic human, mobile phone frame, browser chrome, Windows UI, web page, tablet, iPhone

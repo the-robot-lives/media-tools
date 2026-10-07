@@ -4,7 +4,7 @@
 
 **media-tool** is a terminal utility that generates media assets from declarative YAML prompt files (`.media.prompt`, asset-prompt-payload schema v0.4). Authors declare *intent* — asset type, quality tier, prompt text, acceptance criteria — and the tool owns everything else: provider auto-selection by quality tier, dependency-DAG ordering across prompt files, generation via 16 provider APIs, markup rendering, LLM-based eval grading with provider fallback, and interactive refinement.
 
-The primary implementation is a single Rust binary (`generate-media-prompt`, built with clap/tokio/ratatui) installed to `~/.local/bin`. A legacy bash + Python engine (`bin/` + `lib/`) remains as an install fallback when `cargo` is absent. The repo also ships a **Phoenix + Hologram landing/documentation site** (`web/`, deployed via `helm/media-tool-landing`) and a **local test-lab web server** (`src/test_lab/`) for browser-driven prompt experiments. The tool is part of the wider Noizu utilities ecosystem: the bash wrapper follows k8-lib conventions (config resolution, logging), API keys fall back to the `.envrc.k8.dc` secrets layer at `$INFRA_ROOT`, and the eval system can reach an in-cluster inference proxy in the Noizu k8s cluster.
+The primary implementation is a Rust **library + CLI** (`lib.rs` surface, `generate-media-prompt` binary built with clap/tokio/ratatui) installed to `~/.local/bin`. A legacy bash + Python engine (`bin/` + `lib/`) remains as an install fallback when `cargo` is absent. The repo also ships a **Phoenix + Hologram landing/documentation site** (`web/`, deployed via `helm/media-tool-landing`), a **local test-lab web server** (`src/test_lab/`) for browser-driven prompt experiments, and a **macOS desktop app in progress** (`macos/MediaWorkbench`, SwiftUI + tobor-kit; first slice reads/writes the real `media-tool.yaml`, no Rust FFI yet). The tool is part of the wider Noizu utilities ecosystem: the bash wrapper follows k8-lib conventions (config resolution, logging), API keys fall back to the `.envrc.k8.dc` secrets layer at `$INFRA_ROOT`, and the eval system can reach an in-cluster inference proxy in the Noizu k8s cluster.
 
 ## System Diagram
 
@@ -18,17 +18,20 @@ graph TB
     D --> F["renderers/*<br/>mermaid, plantuml, graphviz, puppeteer"]
     E --> G["output.rs<br/>naming, formats, variants"]
     F --> G
-    G --> H["eval.rs<br/>vision grading via Qwen 3.6"]
+    G --> PP["postprocess.rs / imagefmt.rs<br/>crop, resize, magic-number format reconcile"]
+    PP --> H["eval.rs<br/>vision grading via Qwen 3.6"]
     H -->|fail| E
     H -->|pass| I["Generated assets"]
     D -.-> J["refine.rs / prep.rs / validate.rs / structural.rs<br/>feedback loop, prompt expansion, SVG lint, format detection"]
     D -.-> T["test_lab/*<br/>local browser lab server"]
+    D -.-> WK["macos/MediaWorkbench<br/>SwiftUI desktop front-end (in progress)"]
 ```
 
 ## Core Components
 
 | Component | Purpose |
 |-----------|---------|
+| `src/lib.rs` + `src/orchestrator.rs` | Library surface + run orchestration — all CLI logic reusable by other front-ends (test lab, macOS app) |
 | `src/main.rs` | CLI entry (clap): input resolution, flag handling, pipeline dispatch |
 | `src/schema.rs` | YAML parsing; normalizes legacy v0.1–v0.3 schemas to v0.4 |
 | `src/provider_config.rs` | Loads `media-tool.yaml` (file or URL) — runtime overrides for defaults, tiers, limits |
@@ -37,6 +40,8 @@ graph TB
 | `src/pipeline.rs` | Orchestration: dry-run preview, execution, quality→provider selection, tier ordering |
 | `src/providers/` | 16 `MediaProvider` implementations: Gemini/Imagen, Qwen/DashScope, ZAI, Suno, three TTS engines, six chat providers, Grok/Veo/Wan video |
 | `src/renderers/` | Markup→visual transforms: Mermaid, PlantUML, Graphviz, Puppeteer screenshots |
+| `src/postprocess.rs` + `src/imagefmt.rs` | `post_processing:` steps (crop, resize); image magic-number detection and format reconciliation |
+| `src/telemetry.rs` + `src/term_layer.rs` | Library publishes progress as tracing events; CLI subscriber renders them to the terminal |
 | `src/test_lab/` | Local HTTP server + browser UI for interactive prompt lab (catalog, settings, persistence) |
 | `src/eval.rs` | Weighted-criteria grading via OpenAI-compatible vision endpoint; drives provider fallback |
 | `src/refine.rs` | Interactive loop: feedback → LLM prompt rewrite → in-place file update → regenerate |
@@ -48,8 +53,9 @@ graph TB
 | `lib/media-prompt-engine.py` | Legacy single-file Python engine (stdlib + pyyaml, PEP 723) |
 | `web/` | Phoenix 1.8 + Hologram landing/docs site (home, format, providers, extensibility pages) |
 | `helm/media-tool-landing/` | Helm chart deploying the landing site (wraps static-site subchart) |
+| `macos/MediaWorkbench/` | SwiftUI desktop app (tobor-kit integration; Settings→Keys slice live, FFI pending) |
 | `skill/content-media-engine/` | Claude Code skill packaging: SKILL.md, prompt templates, FIM library |
-| `demos/` | Working `.media.prompt` examples per asset type (10 kinds incl. sfx, component, document) |
+| `demos/` | Working `.media.prompt` examples per asset type (11 kinds incl. sfx, component, document, game) |
 
 → *Components ↔ directories: see [PROJ-LAYOUT.md](PROJ-LAYOUT.md)*
 
@@ -101,8 +107,10 @@ Authors declare `quality: low|medium|high` instead of pinning providers; the too
 - **Runtime config over recompilation**: model defaults/tiers/limits live behind `media-tool.yaml` so fleet behavior can change via a URL-served file, no rebuild.
 - **DAG-first batch model**: cross-file dependencies are first-class (`depends_on` + collapse modes), enabling multi-asset compositions (logo → hero → animation).
 - **Eval-gated generation**: LLM grading with provider fallback trades API cost for hands-off quality; degrades gracefully (skip eval) when no evaluator endpoint is reachable.
+- **Library-first split**: core logic lives in `lib.rs` behind `orchestrator.rs`, and library code publishes progress via `telemetry.rs` tracing events instead of writing to the terminal — so the CLI (`term_layer.rs`), test lab, and macOS app are all front-ends over one engine.
 - **Renderers as post-transforms, not providers**: chat models emit markup; local CLI tools (mmdc, plantuml, dot, Puppeteer) turn it into visuals — cleanly separating generation from rendering.
+- **Honest post-processing failure**: unknown `post_processing:` actions fail the run (non-zero exit) rather than silently reporting success; `--allow-unimplemented-post` downgrades to a warning.
 
 ## Known Gaps
 
-Post-processing actions (resize, convert, optimize, crop, trim, normalize) are parsed but stubbed; within-tier parallelism, `collapse: inline`/`context` substitution, and some image providers (OpenAI, Stability, Replicate, local) are planned — see README "Remaining Work".
+Implemented `post_processing:` actions are `crop`, `resize`, and `render`; other actions (convert, optimize, trim, normalize) are not implemented and fail loudly. `depends_on` `collapse: inline`/`context` substitution and within-tier parallelism are parsed but not yet wired into the pipeline. The macOS app is a first vertical slice (SwiftUI shell + Settings→Keys over the real `media-tool.yaml`) with no Rust FFI yet — Library and Runs screens are placeholders.

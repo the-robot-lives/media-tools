@@ -35,6 +35,17 @@ image_tiers:
     - gemini:gemini-3.1-flash-image
     - qwen-image:qwen-image-3.0-pro
 
+# Chat/text quality-tier ladders, same shape as image_tiers. Drives component,
+# react-page, html, style-guide, diagram, document and unrecognised `type:`
+# prompts. Replaces the built-in ladder for that tier entirely when present.
+chat_tiers:
+  low:
+    - groq-chat:openai/gpt-oss-120b
+  medium:
+    - groq-chat:openai/gpt-oss-120b
+  high:
+    - groq-chat:openai/gpt-oss-120b
+
 # Max prompt chars per service (overrides providers::constraints).
 max_prompt_chars:
   gemini: 4000

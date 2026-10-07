@@ -5,7 +5,8 @@ use serde_json::json;
 
 use crate::attachments::LoadedAttachment;
 use crate::providers::{ChatProvider, GenerationOptions};
-use crate::ui;
+use crate::telemetry as tel;
+use crate::telemetry::progress;
 
 pub struct OpenAiChatProvider;
 
@@ -114,15 +115,18 @@ pub async fn openai_compatible_generate(
     }
 
     if options.verbose {
-        ui::verbose(&format!("POST {}", url));
+        tel::verbose(&format!("POST {}", url));
         let preview: String = user_prompt.chars().take(120).collect();
-        ui::verbose(&format!(
+        tel::verbose(&format!(
             "Prompt: {}{}",
             preview,
             if user_prompt.len() > 120 { "..." } else { "" }
         ));
     }
 
+    // Shared by openai-chat, groq, openrouter and zai; the caller's identity is not
+    // threaded through here, so `url` is what distinguishes them on the wire.
+    progress::provider_request("openai-compatible", &options.model, url, 1);
     let client = reqwest::Client::new();
     let resp = client
         .post(url)
@@ -136,10 +140,16 @@ pub async fn openai_compatible_generate(
     match resp {
         Ok(response) => {
             let status = response.status();
+            progress::provider_response(
+                "openai-compatible",
+                status.as_u16(),
+                status.is_success(),
+                1,
+            );
             if !status.is_success() {
                 let error_body = response.text().await.unwrap_or_default();
                 let preview: String = error_body.chars().take(300).collect();
-                ui::fail_msg(&format!(
+                tel::fail_msg(&format!(
                     "HTTP {} for {}: {}",
                     status.as_u16(),
                     output_path.display(),
@@ -164,7 +174,7 @@ pub async fn openai_compatible_generate(
                     Ok(true)
                 }
                 None => {
-                    ui::fail_msg(&format!(
+                    tel::fail_msg(&format!(
                         "No text content in response for {}",
                         output_path.display()
                     ));
@@ -173,7 +183,8 @@ pub async fn openai_compatible_generate(
             }
         }
         Err(e) => {
-            ui::fail_msg(&format!(
+            progress::provider_response("openai-compatible", 0, false, 1);
+            tel::fail_msg(&format!(
                 "Network error for {}: {}",
                 output_path.display(),
                 e

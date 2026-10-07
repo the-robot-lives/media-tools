@@ -78,6 +78,102 @@ post_processing:
 | `musicgen` | Audio | Todo | P3 | Medium | none |
 | `udio` | Audio | Todo | P3 | High | `UDIO_API_KEY` |
 | `pika` | Video | Todo | P3 | Medium | `PIKA_API_KEY` |
+
+### qwen-image — routes, the ~60s ceiling, and async task mode
+
+qwen-image reaches DashScope by one of two routes, and they behave very differently.
+
+**`multimodal-generation` is synchronous only** on our accounts, and the server closes the
+connection at about 61 seconds. Measured against the live endpoint with the same heavy prompt:
+
+| Client | Protocol | Outcome |
+|--------|----------|---------|
+| curl x3 | HTTP/2 | `Error in the HTTP2 framing layer` at 61.7 / 61.5 / 61.5s |
+| curl | HTTP/1.1 | HTTP 200 at 55.8s, then `Empty reply from server` at 61.1s |
+| this crate, h1-only | HTTP/1.1 | cut at 60.9s, then succeeded at 120.9s with one retry |
+| this crate x3, idle service | HTTP/1.1 | HTTP 200 at 46.8 / 53.7 / 57.0s |
+
+**The cut is not HTTP/2-specific.** That was the working theory for a while, since the h2
+framing error is loud and reproducible. But pinning curl to `--http1.1` only changes how the
+same close is reported, to `Empty reply from server`, and this crate cannot speak HTTP/2 at all
+(the `h2` crate is not in its dependency graph) yet is cut at the same mark. The client is not
+the variable; the server is.
+
+What the numbers say is that one render's latency straddles the ceiling, swinging roughly
+between 45s and 75s with service load, so the same request succeeds or dies on a coin toss.
+No client setting moves a server-side close. Two mitigations follow:
+
+* prompts **without** input images use the async route below, which has no such limit;
+* prompts **with** input images have no async route available, so a dropped connection is
+  retried, three attempts by default (`MEDIA_QWEN_RETRIES`). Measured, one retry was enough.
+
+The route also answers HTTP 403 `AccessDenied` — "current user api does not support
+asynchronous calls" — to the async header, so async is not available on it. It remains the
+**only** route that accepts input images, so prompts with attachments use it automatically.
+
+**`text2image/image-synthesis` is async-native**, and is now the default when a prompt has no
+input images. The POST carries `X-DashScope-Async: enable` and returns a `task_id` in about a
+second; the result is collected by polling `/api/v1/tasks/<id>` and downloading the result
+URL. The same heavy prompt that sits on the ceiling synchronously finished here in 9.6s and
+14.9s.
+
+> **The default route changes the model id.** `text2image` rejects `qwen-image-3.0` with 400
+> `InvalidParameter`, so the route maps the multimodal default onto `qwen-image`;
+> `qwen-image-plus` is also accepted and can be pinned with `model:`. If you need
+> `qwen-image-3.0` specifically, set `provider_options: {route: multimodal}` and accept the
+> ~60s ceiling.
+
+Clients are built through `providers::http` with an explicit connect timeout, connection
+idle-pool retirement disabled, TCP keepalive on, and HTTP/1.1 pinned. That removes the hidden
+ceilings beneath the per-request deadline; it does not and cannot defeat a server-side close.
+The HTTP/1.1 pin is belt-and-braces rather than a behaviour change, since this build has no
+HTTP/2 support to begin with; it keeps a future feature-unification surprise from quietly
+putting long renders back on h2.
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `provider_options.route` | `text2image`, or `multimodal` when the prompt has input images | Force a route: `text2image` / `multimodal`. |
+| `provider_options.async` / `MEDIA_QWEN_ASYNC=1\|0` | on for text2image, off for multimodal | Override async task mode. A route that rejects async on capability grounds falls back to a synchronous call. |
+| `MEDIA_QWEN_TIMEOUT_SECS` | 360 | Client + request ceiling in synchronous mode. |
+| `MEDIA_QWEN_RETRIES` | 3 | Attempts for a synchronous request whose connection the server drops. |
+| `MEDIA_QWEN_POLL_SECS` | 5 | Poll interval in async mode. |
+| `MEDIA_QWEN_POLL_ATTEMPTS` | 120 | Poll ceiling (default 10 minutes). |
+| `MEDIA_DEBUG=1` | off | Log the HTTP client configuration at request time. |
+| `provider_options.base_url` | plan/region | Override the DashScope API root. |
+
+### Providers may not return the format you declared
+
+`output.format` is a request, not a guarantee. The gemini image provider returns **JPEG**
+whatever the prompt declares. Writing those bytes straight to a `.png` path produced a file
+whose name lied about its contents: the run reported success and post-processing failed one
+step later with "cannot decode".
+
+Image bytes are now sniffed by magic number on the way in and reconciled with the requested
+extension:
+
+| Situation | Behaviour |
+|-----------|-----------|
+| Bytes match the declared extension | Written as-is. |
+| Bytes differ and can be re-encoded | Transcoded to the declared format; noted in verbose output. |
+| Bytes differ and cannot be re-encoded | Written under their true extension, with a warning. |
+| Container not recognised | Written verbatim, with a warning. |
+
+Post-processing decodes by content rather than by file name, so a mislabelled file from any
+source is still handled.
+
+### qwen content filter refusals can be lexical
+
+A refusal is not always about the image being asked for. The filter also reads the brief's
+wording, and a single phrase can trip it: a camera-batch brief containing **"AV cart"** was
+refused as adult content, and renaming it to **"projector trolley"** cleared the same brief
+with nothing else changed.
+
+So when qwen refuses a brief that looks unobjectionable, suspect a word before rewriting the
+concept. Scan for terms with an unintended second reading, especially initialisms, swap them
+for a plain-language equivalent, and retry. Refusals are per request, so a swap that works can
+simply stay in the prompt file.
+
+
 | `kling` | Video | Todo | P3 | Medium | `KLING_API_KEY` |
 | `minimax` | Video | Todo | P3 | Medium | `MINIMAX_API_KEY` |
 
@@ -90,7 +186,7 @@ post_processing:
 | `gemini-chat` | **Done** | — | — | `GEMINI_API_KEY` | Pin via `service:` |
 | `openai-chat` | **Done** | — | — | `OPENAI_API_KEY` | Pin via `service:` |
 | `openrouter` / `openrouter-chat` | **Done** | — | — | `OPENROUTER_API_KEY` | Pin via `service:` |
-| `z.ai` / `zai` | **Done** | — | — | `XAI_API_KEY` | Pin via `service:` |
+| `z.ai` / `zai` | **Done** | — | — | `ZAI_API_KEY` | Pin via `service:` |
 
 ### Renderers (local tools)
 
@@ -348,6 +444,19 @@ The engine dispatches to `CHAT_PROVIDERS` for text-generating types (component, 
 **Response:** `choices[0].message.content` → write to file.
 
 **Notes:** OpenAI-compatible chat completion API. Same request/response format.
+z.ai also runs a separate coding-plan endpoint,
+`https://api.z.ai/api/coding/paas/v4` (also OpenAI-compatible), used by
+coding-subscription accounts — see tobor-kit's `llm-inference/catalog.ts`
+`zai` entry, which defaults to it because it targets coding-plan
+subscribers specifically. That base is plausibly correct for a coding
+subscription and wrong for a general `ZAI_API_KEY`, so media-tool's
+`zai` provider intentionally keeps the general `/v1/chat/completions`
+base as its compiled-in default and does not attempt to auto-detect
+which plan a key belongs to. There is currently no `base_url` override
+knob in `ProviderConfig`/`media-tool.yaml` (only `defaults`, `image_tiers`,
+`max_prompt_chars`, `refine_model`, `prompt_guidance`) — a coding-plan
+subscriber cannot switch endpoints without a code change until one is
+added.
 
 **API Key Env:** `ZAI_API_KEY`
 

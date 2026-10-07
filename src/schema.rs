@@ -373,7 +373,8 @@ impl AssetType {
         }
     }
 
-    /// True for chat-based generation types.
+    /// True for chat-based generation types. Unrecognised `type` values land on
+    /// `Unknown` and are treated as generic text assets rather than media.
     // ⟦𓈡𓏣𓄓𓌨⟧ is_chat_type :: True for chat-based generation types.
     pub fn is_chat_type(&self) -> bool {
         matches!(
@@ -384,6 +385,7 @@ impl AssetType {
                 | AssetType::StyleGuide
                 | AssetType::Diagram
                 | AssetType::Document
+                | AssetType::Unknown
         )
     }
 }

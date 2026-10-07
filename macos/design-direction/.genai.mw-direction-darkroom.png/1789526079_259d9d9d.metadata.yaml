@@ -1,0 +1,9 @@
+service: gemini
+model: gemini-3-pro-image
+timestamp: 1789526098
+eval_score: 0.870
+eval_notes: "Clear Mac window chrome (traffic lights, File/Edit toolbar, rounded corners, shadow). Single dominant vignetted artwork on a near-black field with a four-thumbnail filmstrip and circular score badges reads as the intended Lightroom-like restrained direction; palette and density are legible at a glance."
+prompt: |
+  A macOS desktop application window, near-black minimal chrome. One large generated artwork centred and dominant, softly vignetted on a neutral dark field. A horizontal filmstrip of four smaller image thumbnails below, each with a small circular score badge. Thin collapsed toolbar at top. The interface recedes; the image is the subject. Lightroom-like restraint.
+negative: |
+  garbled text, lorem ipsum, watermark, logo, photorealistic human, mobile phone frame, browser chrome, Windows UI, web page, tablet, iPhone

@@ -8,7 +8,7 @@ use std::process::Command;
 
 use crate::eval::EvalScore;
 use crate::schema::EvalSection;
-use crate::ui;
+use crate::telemetry as tel;
 
 /// Result of a structural probe.
 #[derive(Debug, Clone)]
@@ -164,7 +164,7 @@ async fn probe_audio(
     let mean_db = ffmpeg_mean_volume(path).await;
 
     if verbose {
-        ui::verbose(&format!(
+        tel::verbose(&format!(
             "structural audio: duration={:?}s mean_vol={:?}dB size={}",
             duration,
             mean_db,
@@ -263,7 +263,7 @@ async fn probe_video(
     let has_audio = ffprobe_has_stream(path, "a").await.unwrap_or(false);
 
     if verbose {
-        ui::verbose(&format!(
+        tel::verbose(&format!(
             "structural video: duration={:?}s has_v={has_video} has_a={has_audio} size={}",
             duration,
             meta.len()

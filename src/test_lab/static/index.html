@@ -217,6 +217,17 @@
     }
 
     .examples { display: flex; flex-direction: column; gap: 12px; }
+    .pager {
+      display: flex; align-items: center; flex-wrap: wrap;
+      gap: 6px; margin-top: 12px;
+    }
+    .pager-info { color: var(--faint); font-size: .78rem; margin-right: auto; }
+    .pager-gap { color: var(--faint); padding: 0 2px; }
+    .pager-select {
+      background: var(--surface); color: var(--text);
+      border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
+      padding: 6px 8px; font: inherit; font-size: .78rem;
+    }
     .ex {
       border: 1.5px solid var(--border) !important;
     }
@@ -581,6 +592,7 @@
         Select a prompt, then use <strong>Process</strong> on the card (or the toolbar) to generate assets.
       </p>
       <div class="examples" id="examples"></div>
+      <div id="examples-pager"></div>
     </div>
 
     <div class="block" id="preview-block">
@@ -654,6 +666,12 @@
       llmMeta: null,
       settings: null,
       view: "map", // map | workspace | settings
+      // Prompt-list pagination (server-side via /api/prompts/list)
+      examplesPage: 1,
+      examplesPerPage: (() => {
+        const pp = parseInt(new URLSearchParams(location.search).get("per_page"), 10);
+        return pp > 0 ? pp : 24;
+      })(),
     };
 
     const $ = (id) => document.getElementById(id);
@@ -1006,6 +1024,7 @@
       renderCrumbs();
       renderAutoBar();
       updateFlowSteps();
+      state.examplesPage = 1; // new generator → start at its first page
       await loadExamples();
 
       // FIM preview for channel generators
@@ -1056,20 +1075,31 @@
       const root = $("examples");
       if (!g || !root) return [];
       let list = [];
+      let meta = null; // { total, page, per_page, total_pages } when the server list is paginated
 
       try {
         const slug = g.slug || String(g.id || "").replace(/^.*:/, "");
-        const q = new URLSearchParams({ slug });
+        const q = new URLSearchParams({
+          slug,
+          page: String(state.examplesPage),
+          per_page: String(state.examplesPerPage),
+        });
         if (g.id) q.set("id", g.id);
         const data = await api("/api/prompts/list?" + q.toString());
         list = Array.isArray(data.prompts) ? data.prompts : [];
+        meta = {
+          total: data.total ?? list.length,
+          page: data.page ?? 1,
+          per_page: data.per_page ?? state.examplesPerPage,
+          total_pages: data.total_pages ?? 1,
+        };
       } catch (e) {
         console.warn("prompts/list failed", e);
         log("List prompts failed: " + e.message, "fail");
       }
 
-      if (!list.length && g.examples?.length) list = g.examples.slice();
-      if (!list.length && g.demo_paths?.length) {
+      if (!list.length && !meta && g.examples?.length) list = g.examples.slice();
+      if (!list.length && !meta && g.demo_paths?.length) {
         list = g.demo_paths.map((path) => ({
           id: path.split("/").pop().replace(".media.prompt", ""),
           path,
@@ -1080,20 +1110,26 @@
         }));
       }
 
-      if (state.example?.path && !list.some((x) => samePath(x.path, state.example.path))) {
+      if (meta) {
+        // Server-side pagination: order + page slice already applied; the
+        // selected prompt may live on another page — it stays selected in the
+        // workspace but isn't force-injected into this slice.
+        state.examplesPage = meta.page;
+        state.examplesPerPage = meta.per_page;
+      } else if (state.example?.path && !list.some((x) => samePath(x.path, state.example.path))) {
         list = [state.example, ...list];
+        // Prefer newest workspace prompts first (static/fallback lists only)
+        list.sort((a, b) => {
+          const aw = (a.source === "workspace") ? 0 : 1;
+          const bw = (b.source === "workspace") ? 0 : 1;
+          if (aw !== bw) return aw - bw;
+          return String(b.path || "").localeCompare(String(a.path || ""));
+        });
       }
-
-      // Prefer newest workspace prompts first
-      list.sort((a, b) => {
-        const aw = (a.source === "workspace") ? 0 : 1;
-        const bw = (b.source === "workspace") ? 0 : 1;
-        if (aw !== bw) return aw - bw;
-        return String(b.path || "").localeCompare(String(a.path || ""));
-      });
 
       if (!list.length) {
         root.innerHTML = `<div class="empty">No prompts yet. Click <strong>1 · Generate example prompt</strong>.</div>`;
+        renderExamplesPager(null);
         updateFlowSteps();
         return list;
       }
@@ -1141,8 +1177,75 @@
         });
         root.appendChild(card);
       }
+      renderExamplesPager(meta);
       updateFlowSteps();
       return list;
+    }
+
+    // —— Prompt-list pagination ——
+    function renderExamplesPager(meta) {
+      const host = $("examples-pager");
+      if (!host) return;
+      if (!meta || !meta.total) {
+        host.innerHTML = "";
+        return;
+      }
+      const noun = meta.total === 1 ? "prompt" : "prompts";
+      const info = `<span class="pager-info">${meta.total} ${noun} · Page ${meta.page} of ${meta.total_pages}</span>`;
+      const parts = [info];
+      if (meta.total_pages > 1) {
+        parts.push(pagerBtn("‹ Prev", meta.page - 1, meta.page <= 1 ? "off" : ""));
+        for (const n of pagerNumbers(meta.page, meta.total_pages)) {
+          if (n === "…") {
+            parts.push('<span class="pager-gap">…</span>');
+          } else {
+            parts.push(pagerBtn(String(n), n, n === meta.page ? "current" : ""));
+          }
+        }
+        parts.push(pagerBtn("Next ›", meta.page + 1, meta.page >= meta.total_pages ? "off" : ""));
+        const opts = [12, 24, 48, 96].map((n) =>
+          `<option value="${n}"${n === meta.per_page ? " selected" : ""}>${n} / page</option>`
+        ).join("");
+        parts.push(`<select id="examples-per-page" class="pager-select" title="Prompts per page">${opts}</select>`);
+      }
+      host.innerHTML = `<div class="pager">${parts.join("")}</div>`;
+      host.querySelectorAll("[data-page]").forEach((b) => {
+        b.onclick = () => {
+          const p = parseInt(b.getAttribute("data-page"), 10);
+          if (p >= 1 && p <= meta.total_pages && p !== state.examplesPage) {
+            state.examplesPage = p;
+            loadExamples();
+          }
+        };
+      });
+      const sel = host.querySelector("#examples-per-page");
+      if (sel) {
+        sel.onchange = () => {
+          state.examplesPerPage = parseInt(sel.value, 10) || 24;
+          state.examplesPage = 1;
+          loadExamples();
+        };
+      }
+    }
+
+    function pagerBtn(label, page, state2) {
+      // state2: "current" (this page) | "off" (disabled) | "" (clickable)
+      const cls = state2 === "current" ? "btn sm primary" : "btn sm";
+      const disabled = state2 ? " disabled" : "";
+      return `<button type="button" class="${cls}" data-page="${page}"${disabled}>${esc(label)}</button>`;
+    }
+
+    // Page numbers with ellipsis: 1, neighbors of current, and last page.
+    function pagerNumbers(current, total) {
+      const out = [];
+      for (let n = 1; n <= total; n++) {
+        if (n === 1 || n === total || Math.abs(n - current) <= 1) {
+          out.push(n);
+        } else if (out[out.length - 1] !== "…") {
+          out.push("…");
+        }
+      }
+      return out;
     }
 
     function samePath(a, b) {

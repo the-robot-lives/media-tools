@@ -151,7 +151,7 @@ fn scan_root(
                     .push(summary);
             }
             Err(e) => {
-                eprintln!("  lab: skip {}: {e}", path.display());
+                crate::telemetry::raw(&format!("  lab: skip {}: {e}", path.display()));
             }
         }
     }

@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use crate::attachments::{load_attachments, validate_attachments};
@@ -10,9 +11,11 @@ use crate::providers::{
     is_stub_provider, resolve_api_key, Candidate, GenerationOptions,
 };
 use crate::refine::interactive_refine_loop;
+use crate::postprocess;
 use crate::renderers;
-use crate::schema::{AssetType, ParsedPrompt, Quality};
-use crate::ui;
+use crate::schema::{AssetType, AudioKind, ParsedPrompt, Quality};
+use crate::telemetry as tel;
+use crate::telemetry::progress;
 use crate::validate;
 
 pub struct PipelineConfig {
@@ -31,6 +34,9 @@ pub struct PipelineConfig {
     pub fim_enabled: bool,
     pub eval_url: Option<String>,
     pub eval_model: Option<String>,
+    /// Downgrade unimplemented `post_processing` actions from a hard failure to a warning.
+    /// Off by default: a step the tool cannot perform must not look like success.
+    pub allow_unimplemented_post: bool,
 }
 
 // ⟦𓈎𓄂𓅪𓅙⟧ run_generation :: auto-generated pointer for public function run_generation
@@ -39,7 +45,7 @@ pub async fn run_generation(
     config: &PipelineConfig,
 ) -> color_eyre::Result<()> {
     // Validate attachments
-    ui::step("Validating prompt files");
+    tel::step("Validating prompt files");
     for prompt in &prompts {
         if !validate_attachments(prompt) {
             color_eyre::eyre::bail!(
@@ -48,12 +54,12 @@ pub async fn run_generation(
             );
         }
     }
-    ui::ok("All attachments validated");
+    tel::ok("All attachments validated");
 
     // Dependency sort
-    ui::step("Resolving dependencies");
+    tel::step("Resolving dependencies");
     let sorted_prompts = topological_sort(prompts)?;
-    ui::ok(&format!(
+    tel::ok(&format!(
         "{} prompt(s) in generation order",
         sorted_prompts.len()
     ));
@@ -61,7 +67,7 @@ pub async fn run_generation(
     if config.verbose {
         for (i, p) in sorted_prompts.iter().enumerate() {
             let svc = p.meta.service.as_deref().unwrap_or("auto");
-            ui::info(&format!(
+            tel::info(&format!(
                 "  {}. {} ({:?}, service={}, quality={}, schema=v{})",
                 i + 1,
                 p.meta.id,
@@ -108,12 +114,26 @@ pub async fn run_generation(
     }
 
     if plan.is_empty() {
-        ui::ok("No prompt files to process");
+        tel::ok("No prompt files to process");
         return Ok(());
     }
 
+    let run_span = progress::run_span(
+        total_outputs,
+        plan.len(),
+        config.variant_count,
+        config.dry_run,
+    );
+    let _run_guard = run_span.enter();
+    progress::run_started(
+        total_outputs,
+        plan.len(),
+        config.variant_count,
+        config.dry_run,
+    );
+
     // Show plan
-    ui::step(&format!(
+    tel::step(&format!(
         "Generation plan: {} output(s) from {} prompt(s)",
         total_outputs,
         plan.len()
@@ -134,13 +154,22 @@ pub async fn run_generation(
             .as_ref()
             .and_then(|d| d.aspect_ratio.as_deref());
 
-        ui::plan_item(
+        tel::plan_item(
             &meta.id,
             &format!("{:?}", meta.asset_type),
             &display_service,
         );
+        for (path, _) in paths {
+            progress::plan_item(
+                &meta.id,
+                &format!("{:?}", meta.asset_type),
+                &display_service,
+                &display_model,
+                &path.display().to_string(),
+            );
+        }
         let preview: String = prompt_text.chars().take(100).collect();
-        ui::plan_detail(
+        tel::plan_detail(
             "Prompt",
             &format!(
                 "{}{}",
@@ -149,51 +178,51 @@ pub async fn run_generation(
             ),
         );
         if let Some(ar) = aspect {
-            ui::plan_detail("Aspect", ar);
+            tel::plan_detail("Aspect", ar);
         }
         if let Some(ref neg) = prompt.payload.prompt.negative {
             let preview: String = neg.chars().take(80).collect();
-            ui::plan_detail(
+            tel::plan_detail(
                 "Neg.",
                 &format!("{}{}", preview, if neg.len() > 80 { "..." } else { "" }),
             );
         }
-        ui::plan_detail("Model", &display_model);
+        tel::plan_detail("Model", &display_model);
 
         // Show duration if set
         if let Some(dur) = meta.duration {
-            ui::plan_detail("Duration", &format!("{:.1}s", dur));
+            tel::plan_detail("Duration", &format!("{:.1}s", dur));
         }
 
         if !prompt.payload.prompt.provider_options.is_empty() {
-            ui::plan_detail(
+            tel::plan_detail(
                 "Options",
-                &format!("{:?}", prompt.payload.prompt.provider_options),
+                &format_provider_options(&prompt.payload.prompt.provider_options),
             );
         }
 
         if !prompt.payload.attachments.is_empty() {
-            ui::plan_detail(
+            tel::plan_detail(
                 "Attach",
                 &format!("{} file(s)", prompt.payload.attachments.len()),
             );
             for att in &prompt.payload.attachments {
-                eprintln!("             - {} ({})", att.path, att.role);
+                tel::raw(&format!("             - {} ({})", att.path, att.role));
             }
         }
 
         if !prompt.payload.post_processing.is_empty() {
-            ui::plan_detail(
+            tel::plan_detail(
                 "Post",
                 &format!("{} step(s)", prompt.payload.post_processing.len()),
             );
             for ps in &prompt.payload.post_processing {
-                eprintln!("             - {}", ps.action);
+                tel::raw(&format!("             - {}", ps.action));
             }
         }
 
         if let Some(eval) = &prompt.payload.eval {
-            ui::plan_detail(
+            tel::plan_detail(
                 "Eval",
                 &format!(
                     "threshold={:.2}, max_attempts={:?}, criteria={}",
@@ -207,16 +236,17 @@ pub async fn run_generation(
         for (op, desc) in paths {
             if let Some(d) = desc {
                 let preview: String = d.chars().take(60).collect();
-                ui::plan_detail("Output", &format!("{} — {}", op.display(), preview));
+                tel::plan_detail("Output", &format!("{} — {}", op.display(), preview));
             } else {
-                ui::plan_detail("Output", &op.display().to_string());
+                tel::plan_detail("Output", &op.display().to_string());
             }
         }
     }
 
     if config.dry_run {
-        eprintln!();
-        ui::ok("Dry run complete \u{2014} no API calls made");
+        tel::blank();
+        tel::ok("Dry run complete \u{2014} no API calls made");
+        progress::run_completed(0, 0, true);
         return Ok(());
     }
 
@@ -244,18 +274,19 @@ pub async fn run_generation(
     let groq_key = std::env::var("GROQ_API_KEY").unwrap_or_default();
     let groq_model = std::env::var("GROQ_VISION_MODEL").ok();
 
-    ui::step(&format!(
+    tel::step(&format!(
         "Generating {} output(s), {} candidate(s) each",
         total_outputs, config.variant_count
     ));
     if config.variant_count > 1 && groq_key.is_empty() && evaluator.is_none() {
-        ui::warn_msg(
+        tel::warn_msg(
             "GROQ_API_KEY not set and no eval endpoint \u{2014} will pick first candidate",
         );
     }
 
     let mut succeeded = 0usize;
     let mut failed = 0usize;
+    let mut post_failures: Vec<String> = Vec::new();
     let mut gen_index = 0usize;
 
     for (mut prompt, paths) in plan {
@@ -278,7 +309,7 @@ pub async fn run_generation(
                     .map(|c| format!("{} ({})", c.service, api_key_env(c.service)))
                     .collect()
             };
-            ui::fail_msg(&format!(
+            tel::fail_msg(&format!(
                 "No available providers for {} — missing API keys: {}",
                 prompt.meta.id,
                 needed.join(", ")
@@ -309,7 +340,21 @@ pub async fn run_generation(
         for (output_path, per_output_desc) in &paths {
             gen_index += 1;
             let basename = output_path.file_name().unwrap().to_string_lossy();
-            ui::progress_label(gen_index, total_outputs, &basename);
+            let output_display = output_path.display().to_string();
+            let output_span = progress::output_span(
+                &prompt.meta.id,
+                &output_display,
+                gen_index,
+                total_outputs,
+            );
+            let _output_guard = output_span.enter();
+            progress::output_started(
+                &prompt.meta.id,
+                gen_index,
+                total_outputs,
+                &output_display,
+            );
+            tel::progress_label(gen_index, total_outputs, &basename);
 
             // If this output has its own description, temporarily override
             // the prompt text for this generation (multi-output SFX, etc.).
@@ -344,7 +389,14 @@ pub async fn run_generation(
                         failed += 1;
                     }
                     Err(e) => {
-                        ui::fail_msg(&format!("Error generating {}: {}", basename, e));
+                        tel::fail_msg(&format!("Error generating {}: {}", basename, e));
+                        progress::output_completed(
+                            &prompt.meta.id,
+                            &output_display,
+                            false,
+                            "",
+                            progress::NO_SCORE,
+                        );
                         failed += 1;
                     }
                 }
@@ -373,7 +425,14 @@ pub async fn run_generation(
                         failed += 1;
                     }
                     Err(e) => {
-                        ui::fail_msg(&format!("Error generating {}: {}", basename, e));
+                        tel::fail_msg(&format!("Error generating {}: {}", basename, e));
+                        progress::output_completed(
+                            &prompt.meta.id,
+                            &output_display,
+                            false,
+                            "",
+                            progress::NO_SCORE,
+                        );
                         failed += 1;
                     }
                 }
@@ -399,7 +458,8 @@ pub async fn run_generation(
                         match renderers::get_renderer(tool_name) {
                             Some(renderer) => {
                                 if !renderer.is_available() {
-                                    ui::warn_msg(&format!(
+                                    progress::renderer_unavailable(tool_name);
+                                    tel::warn_msg(&format!(
                                         "Renderer '{}' not found \u{2014} install it to enable rendering",
                                         tool_name
                                     ));
@@ -414,7 +474,12 @@ pub async fn run_generation(
 
                                 for src in &path_results {
                                     let render_output = src.with_extension(output_format);
-                                    ui::step(&format!(
+                                    progress::renderer_invoked(
+                                        tool_name,
+                                        &src.display().to_string(),
+                                        &render_output.display().to_string(),
+                                    );
+                                    tel::step(&format!(
                                         "Rendering {} \u{2192} {}",
                                         src.file_name().unwrap().to_string_lossy(),
                                         render_output.file_name().unwrap().to_string_lossy()
@@ -427,19 +492,19 @@ pub async fn run_generation(
                                                 prep_llm,
                                             )
                                             .await;
-                                            ui::ok(&format!(
+                                            tel::ok(&format!(
                                                 "Rendered: {}",
                                                 render_output.display()
                                             ));
                                         }
                                         Ok(false) => {
-                                            ui::fail_msg(&format!(
+                                            tel::fail_msg(&format!(
                                                 "Render failed: {}",
                                                 render_output.display()
                                             ));
                                         }
                                         Err(e) => {
-                                            ui::fail_msg(&format!(
+                                            tel::fail_msg(&format!(
                                                 "Render error for {}: {}",
                                                 render_output.display(),
                                                 e
@@ -449,18 +514,54 @@ pub async fn run_generation(
                                 }
                             }
                             None => {
-                                ui::warn_msg(&format!(
+                                progress::renderer_unavailable(tool_name);
+                                tel::warn_msg(&format!(
                                     "Unknown renderer '{}' \u{2014} skipping",
                                     tool_name
                                 ));
                             }
                         }
                     }
+                    action if postprocess::handles(action) => {
+                        for src in &path_results {
+                            tel::step(&format!(
+                                "Post-processing: {} \u{2192} {}",
+                                action,
+                                src.file_name().unwrap().to_string_lossy()
+                            ));
+                            match postprocess::apply_to_file(src, action, &pp_step.params) {
+                                Ok((w, h)) => {
+                                    tel::ok(&format!(
+                                        "{}: {} is now {}x{}",
+                                        action,
+                                        src.file_name().unwrap().to_string_lossy(),
+                                        w,
+                                        h
+                                    ));
+                                }
+                                Err(e) => {
+                                    let msg = format!(
+                                        "post-processing '{}' failed for {}: {}",
+                                        action,
+                                        src.display(),
+                                        e
+                                    );
+                                    tel::fail_msg(&msg);
+                                    post_failures.push(msg);
+                                }
+                            }
+                        }
+                    }
                     other => {
-                        ui::info(&format!(
-                            "Post-processing: {} (not yet implemented) \u{2014} params: {:?}",
+                        let msg = format!(
+                            "post-processing action '{}' is not implemented \u{2014} output left \
+                             unprocessed (params: {:?})",
                             other, pp_step.params
-                        ));
+                        );
+                        tel::warn_msg(&msg);
+                        if !config.allow_unimplemented_post {
+                            post_failures.push(msg);
+                        }
                     }
                 }
             }
@@ -485,12 +586,13 @@ pub async fn run_generation(
     }
 
     // Summary
-    ui::step("Generation complete");
-    ui::ok(&format!("{} succeeded", succeeded));
+    progress::run_completed(succeeded, failed, false);
+    tel::step("Generation complete");
+    tel::ok(&format!("{} succeeded", succeeded));
     if failed > 0 {
-        ui::fail_msg(&format!("{} failed", failed));
+        tel::fail_msg(&format!("{} failed", failed));
     }
-    eprintln!();
+    tel::blank();
 
     // Surface total failure as an error so lab jobs / CLI exit codes reflect reality.
     // (Previously always Ok(()) even when every candidate 404'd — UI showed "Done" with 0 files.)
@@ -499,6 +601,15 @@ pub async fn run_generation(
             "Generation failed: 0 outputs written ({} attempt(s) failed). \
              Check API keys and model names (Groq default: openai/gpt-oss-120b).",
             failed
+        );
+    }
+
+    if !post_failures.is_empty() {
+        color_eyre::eyre::bail!(
+            "Post-processing failed ({} step(s)):\n  - {}\n\
+             Pass --allow-unimplemented-post to downgrade unimplemented actions to warnings.",
+            post_failures.len(),
+            post_failures.join("\n  - ")
         );
     }
 
@@ -697,6 +808,8 @@ async fn run_eval_gated(
     prep_llm: Option<&PromptPrepper>,
 ) -> color_eyre::Result<bool> {
     let basename = output_path.file_name().unwrap().to_string_lossy();
+    let output_display = output_path.display().to_string();
+    let prompt_id = prompt.meta.id.clone();
     let eval_section = prompt.payload.eval.as_ref().unwrap();
 
     let mut global_best: Option<(f64, PathBuf, String)> = None; // (score, path, service)
@@ -707,7 +820,7 @@ async fn run_eval_gated(
         let svc = candidate.service;
         if is_stub_provider(svc) {
             if config.verbose {
-                ui::verbose(&format!("Skipping stub provider '{}'", svc));
+                tel::verbose(&format!("Skipping stub provider '{}'", svc));
             }
             continue;
         }
@@ -715,7 +828,7 @@ async fn run_eval_gated(
         let env_name = api_key_env(svc);
         let api_key = resolve_api_key(svc).unwrap_or_default();
         if api_key.is_empty() {
-            ui::warn_msg(&format!(
+            tel::warn_msg(&format!(
                 "{} not set — skipping {} ({} provider)",
                 env_name, prompt.meta.id, svc
             ));
@@ -730,21 +843,38 @@ async fn run_eval_gated(
         // If the output already exists, assume the verbatim prompt was
         // already tried — skip straight to LLM-refined attempts.
         let start_attempt = if output_path.exists() {
-            ui::info("Output exists — skipping verbatim, starting with LLM-refined prompt");
+            tel::info("Output exists — skipping verbatim, starting with LLM-refined prompt");
             1usize
         } else {
             0usize
         };
 
         for attempt in start_attempt..=MAX_REFINEMENTS {
+            let attempt_span = progress::attempt_span(
+                &prompt_id,
+                &output_display,
+                attempt + 1,
+                MAX_REFINEMENTS + 1,
+                svc,
+                candidate.model,
+            );
+            let _attempt_guard = attempt_span.enter();
+            progress::attempt_started(
+                &prompt_id,
+                attempt + 1,
+                MAX_REFINEMENTS + 1,
+                svc,
+                candidate.model,
+                &output_display,
+            );
             if config.verbose {
                 if attempt == 0 {
-                    ui::verbose(&format!(
+                    tel::verbose(&format!(
                         "Trying provider {} / {} for {}",
                         svc, candidate.model, basename
                     ));
                 } else {
-                    ui::verbose(&format!(
+                    tel::verbose(&format!(
                         "Retry {}/{} for {} via {} (refining prompt from eval feedback)",
                         attempt, MAX_REFINEMENTS, basename, svc
                     ));
@@ -773,8 +903,8 @@ async fn run_eval_gated(
                     prompt.payload.prompt.text.clone()
                 };
 
-                // Use SFX-specific constraint when model targets sound generation
-                let constraint_key = if candidate.model.contains("SOUND") {
+                // Use SFX-specific constraint when the asset is a sound effect
+                let constraint_key = if svc == "suno" && prompt.meta.audio_kind == AudioKind::Sfx {
                     "suno-sfx"
                 } else {
                     svc
@@ -783,7 +913,7 @@ async fn run_eval_gated(
                 if let Some(max) = limit {
                     if raw_text.len() > max {
                         // Prompt exceeds provider limit — must use LLM to condense
-                        ui::info(&format!(
+                        tel::info(&format!(
                             "Prompt ({} chars) exceeds {} limit ({}) — using LLM to condense",
                             raw_text.len(),
                             svc,
@@ -811,7 +941,7 @@ async fn run_eval_gated(
                                 None => {
                                     // Truncate as last resort (also used when prep
                                     // channel disallows LLM rewrite, e.g. voice)
-                                    ui::warn_msg(&format!(
+                                    tel::warn_msg(&format!(
                                         "LLM prep unavailable — truncating to {} chars (quality may suffer)",
                                         max
                                     ));
@@ -820,7 +950,7 @@ async fn run_eval_gated(
                                 }
                             }
                         } else {
-                            ui::warn_msg(&format!(
+                            tel::warn_msg(&format!(
                                 "No LLM available — truncating to {} chars (quality may suffer)",
                                 max
                             ));
@@ -852,7 +982,14 @@ async fn run_eval_gated(
                     .await
                 {
                     Some(refined) => {
-                        ui::info(&format!(
+                        progress::refine_applied(
+                            &prompt_id,
+                            attempt + 1,
+                            svc,
+                            prompt.payload.prompt.text.chars().count(),
+                            refined.text.chars().count(),
+                        );
+                        tel::info(&format!(
                             "Prompt refined via LLM (attempt {}) for {} provider",
                             attempt + 1,
                             svc
@@ -865,7 +1002,7 @@ async fn run_eval_gated(
                         )
                     }
                     None => {
-                        ui::warn_msg("LLM refinement failed — re-sending raw prompt");
+                        tel::warn_msg("LLM refinement failed — re-sending raw prompt");
                         (
                             prompt.payload.prompt.text.clone(),
                             prompt.payload.prompt.negative.clone(),
@@ -894,7 +1031,14 @@ async fn run_eval_gated(
             .await?;
 
             if !ok {
-                ui::warn_msg(&format!("Generation failed for {} via {}", basename, svc));
+                progress::attempt_failed(
+                    &prompt_id,
+                    attempt + 1,
+                    svc,
+                    &output_display,
+                    "provider returned no artifact",
+                );
+                tel::warn_msg(&format!("Generation failed for {} via {}", basename, svc));
                 break;
             }
 
@@ -923,17 +1067,40 @@ async fn run_eval_gated(
 
             match score {
                 None => {
-                    ui::warn_msg(&format!(
+                    progress::attempt_completed(
+                        &prompt_id,
+                        attempt + 1,
+                        svc,
+                        &output_display,
+                        true,
+                        progress::NO_SCORE,
+                    );
+                    tel::warn_msg(&format!(
                         "{} is un-scorable — accepting without eval",
                         basename
                     ));
                     link_active(&genai_path, output_path)?;
                     validate::validate_svg(output_path, config.verbose, prep_llm).await;
-                    ui::ok(&format!("Generated: {}", output_path.display()));
+                    tel::ok(&format!("Generated: {}", output_path.display()));
+                    progress::output_completed(
+                        &prompt_id,
+                        &output_display,
+                        true,
+                        svc,
+                        progress::NO_SCORE,
+                    );
                     return Ok(true);
                 }
                 Some(s) => {
                     let w = s.weighted;
+                    progress::attempt_completed(
+                        &prompt_id,
+                        attempt + 1,
+                        svc,
+                        &output_display,
+                        s.passes(eval_section),
+                        w,
+                    );
 
                     // Update metadata with eval score
                     write_metadata(
@@ -948,7 +1115,7 @@ async fn run_eval_gated(
                     );
 
                     if config.verbose {
-                        ui::verbose(&format!(
+                        tel::verbose(&format!(
                             "Score for {} via {} (attempt {}): weighted={:.3}, pass={}",
                             basename,
                             svc,
@@ -969,11 +1136,12 @@ async fn run_eval_gated(
                     if s.passes(eval_section) {
                         link_active(&genai_path, output_path)?;
                         validate::validate_svg(output_path, config.verbose, prep_llm).await;
-                        ui::ok(&format!(
+                        tel::ok(&format!(
                             "Generated (passed eval, score={:.3}): {}",
                             w,
                             output_path.display()
                         ));
+                        progress::output_completed(&prompt_id, &output_display, true, svc, w);
                         return Ok(true);
                     }
 
@@ -993,7 +1161,13 @@ async fn run_eval_gated(
                     ));
 
                     if attempt < MAX_REFINEMENTS && prep_llm.is_some() {
-                        ui::info(&format!(
+                        progress::refine_started(
+                            &prompt_id,
+                            attempt + 2,
+                            svc,
+                            "score below threshold",
+                        );
+                        tel::info(&format!(
                             "Score {:.3} below threshold {:.2} — refining prompt (attempt {})",
                             w,
                             eval_section.effective_pass_threshold(),
@@ -1007,22 +1181,30 @@ async fn run_eval_gated(
 
     // Exhausted all candidates — use global best with warning
     if let Some((score, best_path, svc)) = global_best {
-        ui::warn_msg(&format!(
+        tel::warn_msg(&format!(
             "No provider passed eval for {} (best score={:.3} via {}) \u{2014} keeping best",
             basename, score, svc
         ));
         link_active(&best_path, output_path)?;
         validate::validate_svg(output_path, config.verbose, prep_llm).await;
-        ui::ok(&format!(
+        tel::ok(&format!(
             "Generated (best available): {}",
             output_path.display()
         ));
+        progress::output_completed(&prompt_id, &output_display, true, &svc, score);
         Ok(true)
     } else {
-        ui::fail_msg(&format!(
+        tel::fail_msg(&format!(
             "All candidates failed for: {}",
             output_path.display()
         ));
+        progress::output_completed(
+            &prompt_id,
+            &output_display,
+            false,
+            "",
+            progress::NO_SCORE,
+        );
         Ok(false)
     }
 }
@@ -1044,12 +1226,21 @@ async fn run_legacy_variants(
 ) -> color_eyre::Result<bool> {
     let svc = candidate.service;
     let basename = output_path.file_name().unwrap().to_string_lossy();
+    let output_display = output_path.display().to_string();
+    let prompt_id = prompt.meta.id.clone();
 
     if is_stub_provider(svc) {
-        ui::warn_msg(&format!(
+        tel::warn_msg(&format!(
             "Provider '{}' is not yet implemented \u{2014} skipping generation",
             svc
         ));
+        progress::output_completed(
+            &prompt_id,
+            &output_display,
+            false,
+            svc,
+            progress::NO_SCORE,
+        );
         return Ok(false);
     }
 
@@ -1072,20 +1263,34 @@ async fn run_legacy_variants(
     };
 
     if !supported {
-        ui::warn_msg(&format!(
+        tel::warn_msg(&format!(
             "Skipping {}: {:?} generation not supported via {}",
             prompt.meta.id, prompt.meta.asset_type, svc
         ));
+        progress::output_completed(
+            &prompt_id,
+            &output_display,
+            false,
+            svc,
+            progress::NO_SCORE,
+        );
         return Ok(false);
     }
 
     let env_name = api_key_env(svc);
     let api_key = resolve_api_key(svc).unwrap_or_default();
     if api_key.is_empty() {
-        ui::warn_msg(&format!(
+        tel::warn_msg(&format!(
             "{} not set — skipping {} ({} provider)",
             env_name, prompt.meta.id, svc
         ));
+        progress::output_completed(
+            &prompt_id,
+            &output_display,
+            false,
+            svc,
+            progress::NO_SCORE,
+        );
         return Ok(false);
     }
 
@@ -1093,9 +1298,26 @@ async fn run_legacy_variants(
 
     let mut variant_paths: Vec<PathBuf> = Vec::new();
     for v in 0..config.variant_count {
+        let attempt_span = progress::attempt_span(
+            &prompt_id,
+            &output_display,
+            v + 1,
+            config.variant_count,
+            svc,
+            candidate.model,
+        );
+        let _attempt_guard = attempt_span.enter();
+        progress::attempt_started(
+            &prompt_id,
+            v + 1,
+            config.variant_count,
+            svc,
+            candidate.model,
+            &output_display,
+        );
         let genai_path = genai_candidate_path(output_path);
         if config.variant_count > 1 && config.verbose {
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "Candidate {}/{}: {}",
                 v + 1,
                 config.variant_count,
@@ -1107,7 +1329,7 @@ async fn run_legacy_variants(
         // happened in the outer loop for non-per-output cases).
         let raw_text = prompt.payload.prompt.text.clone();
 
-        let constraint_key = if candidate.model.contains("SOUND") {
+        let constraint_key = if svc == "suno" && prompt.meta.audio_kind == AudioKind::Sfx {
             "suno-sfx"
         } else {
             svc
@@ -1115,7 +1337,7 @@ async fn run_legacy_variants(
         let limit = constraints(constraint_key).max_prompt_chars;
         let (gen_text, gen_neg) = if let Some(max) = limit {
             if raw_text.len() > max {
-                ui::info(&format!(
+                tel::info(&format!(
                     "Prompt ({} chars) exceeds {} limit ({}) — using LLM to condense",
                     raw_text.len(),
                     svc,
@@ -1141,7 +1363,7 @@ async fn run_legacy_variants(
                                 .or_else(|| prompt.payload.prompt.negative.clone()),
                         ),
                         None => {
-                            ui::warn_msg(&format!(
+                            tel::warn_msg(&format!(
                                 "LLM prep unavailable — truncating to {} chars",
                                 max
                             ));
@@ -1150,7 +1372,7 @@ async fn run_legacy_variants(
                         }
                     }
                 } else {
-                    ui::warn_msg(&format!("No LLM available — truncating to {} chars", max));
+                    tel::warn_msg(&format!("No LLM available — truncating to {} chars", max));
                     let truncated: String = raw_text.chars().take(max).collect();
                     (truncated, prompt.payload.prompt.negative.clone())
                 }
@@ -1160,13 +1382,14 @@ async fn run_legacy_variants(
         } else {
             (raw_text, prompt.payload.prompt.negative.clone())
         };
+        let gen = GenerationInputs::new(gen_text, gen_neg);
 
         let system_prompt = text_inference_system_prompt(svc, prompt, config.fim_enabled);
 
         let ok = generate_one(
             svc,
-            &gen_text,
-            gen_neg.as_deref(),
+            &gen.text,
+            gen.negative.as_deref(),
             system_prompt.as_deref(),
             &genai_path,
             &api_key,
@@ -1176,29 +1399,48 @@ async fn run_legacy_variants(
         .await?;
 
         if ok {
-            write_metadata(
+            write_variant_metadata(
                 &genai_path,
                 svc,
                 candidate.model,
-                &gen_text,
-                prompt.payload.prompt.negative.as_deref(),
-                None,
-                None,
+                &gen,
                 &prompt.payload.prompt.provider_options,
+            );
+            progress::attempt_completed(
+                &prompt_id,
+                v + 1,
+                svc,
+                &output_display,
+                true,
+                progress::NO_SCORE,
             );
             variant_paths.push(genai_path);
         } else {
-            ui::warn_msg(&format!("Candidate {} failed for {}", v + 1, basename));
+            progress::attempt_failed(
+                &prompt_id,
+                v + 1,
+                svc,
+                &output_display,
+                "provider returned no artifact",
+            );
+            tel::warn_msg(&format!("Candidate {} failed for {}", v + 1, basename));
         }
     }
 
     if variant_paths.is_empty() {
-        ui::fail_msg(&format!("All candidates failed: {}", output_path.display()));
+        tel::fail_msg(&format!("All candidates failed: {}", output_path.display()));
+        progress::output_completed(
+            &prompt_id,
+            &output_display,
+            false,
+            svc,
+            progress::NO_SCORE,
+        );
         return Ok(false);
     }
 
     let best_idx = if variant_paths.len() > 1 {
-        ui::step(&format!(
+        tel::step(&format!(
             "Evaluating {} candidates for {}",
             variant_paths.len(),
             basename
@@ -1221,7 +1463,7 @@ async fn run_legacy_variants(
                     }
                 }
             }
-            ui::info(&format!(
+            tel::info(&format!(
                 "Selected candidate {} of {} (score={:.3})",
                 best_i + 1,
                 variant_paths.len(),
@@ -1240,7 +1482,7 @@ async fn run_legacy_variants(
                 config.verbose,
             )
             .await;
-            ui::info(&format!(
+            tel::info(&format!(
                 "Selected candidate {} of {}",
                 idx + 1,
                 variant_paths.len()
@@ -1253,9 +1495,16 @@ async fn run_legacy_variants(
 
     link_active(&variant_paths[best_idx], output_path)?;
     validate::validate_svg(output_path, config.verbose, prep_llm).await;
-    ui::ok(&format!("Generated: {}", output_path.display()));
+    tel::ok(&format!("Generated: {}", output_path.display()));
+    progress::output_completed(
+        &prompt_id,
+        &output_display,
+        true,
+        svc,
+        progress::NO_SCORE,
+    );
     if config.verbose {
-        ui::verbose(&format!(
+        tel::verbose(&format!(
             "Active link: {} -> {}",
             variant_paths[best_idx]
                 .file_name()
@@ -1287,8 +1536,8 @@ async fn generate_one(
     let is_chat = get_chat_provider(svc).is_some();
 
     // Show full prompt sent to the provider
-    eprintln!();
-    ui::step(&format!(
+    tel::blank();
+    tel::step(&format!(
         "{} prompt sent to {} provider ({} chars):",
         if is_chat { "User" } else { "Prompt" },
         svc,
@@ -1297,19 +1546,19 @@ async fn generate_one(
     if is_chat {
         let system_chars = system.map(|s| s.len()).unwrap_or(0);
         if system_chars > 0 {
-            ui::plan_detail("System", &format!("{} chars", system_chars));
+            tel::plan_detail("System", &format!("{} chars", system_chars));
         }
     }
     for line in prompt_text.lines() {
-        eprintln!("  {}", line);
+        tel::raw(&format!("  {}", line));
     }
     if let Some(neg) = negative {
         if !neg.is_empty() {
-            eprintln!();
-            ui::plan_detail("Negative", neg);
+            tel::blank();
+            tel::plan_detail("Negative", neg);
         }
     }
-    eprintln!();
+    tel::blank();
 
     if is_chat {
         let Some(chat_provider) = get_chat_provider(svc) else {
@@ -1356,5 +1605,172 @@ fn build_options(model: &str, prompt: &ParsedPrompt, config: &PipelineConfig) ->
         provider_options: prompt.payload.prompt.provider_options.clone(),
         verbose: config.verbose,
         duration_seconds: prompt.meta.duration,
+        audio_kind: prompt.meta.audio_kind,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Generation-time inputs + output formatting helpers
+// ---------------------------------------------------------------------------
+
+/// The prompt text and negative prompt actually handed to the provider for one
+/// generation.
+///
+/// These can differ from the values declared in the `.media.prompt` file: when a
+/// prompt exceeds a provider's length limit the LLM prepper may return both a
+/// condensed text and a replacement negative. Carrying the two together lets the
+/// sidecar writer below see only what was sent, never the declared value it may
+/// have replaced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GenerationInputs {
+    text: String,
+    negative: Option<String>,
+}
+
+impl GenerationInputs {
+    fn new(text: String, negative: Option<String>) -> Self {
+        Self { text, negative }
+    }
+}
+
+/// Write the metadata sidecar for a generated variant.
+///
+/// Deliberately takes [`GenerationInputs`] rather than the parsed prompt so the
+/// recorded negative prompt is necessarily the one that was sent — recording the
+/// declared negative instead makes the asset non-reproducible from its own
+/// metadata. See `variant_sidecar_records_effective_negative`.
+fn write_variant_metadata(
+    genai_path: &std::path::Path,
+    service: &str,
+    model: &str,
+    gen: &GenerationInputs,
+    provider_options: &HashMap<String, serde_yaml::Value>,
+) {
+    write_metadata(
+        genai_path,
+        service,
+        model,
+        &gen.text,
+        gen.negative.as_deref(),
+        None,
+        None,
+        provider_options,
+    );
+}
+
+/// Render `provider_options` for the plan summary with deterministic key order.
+///
+/// `provider_options` is a `HashMap`, whose iteration order varies from run to
+/// run; byte-for-byte diffing of CLI output is a primary regression check on this
+/// codebase, so the keys are sorted at the emission site. `Debug` for a `BTreeMap`
+/// of references renders byte-identically to the `HashMap` form apart from the
+/// ordering, so the line's shape is unchanged.
+fn format_provider_options(options: &HashMap<String, serde_yaml::Value>) -> String {
+    let ordered: BTreeMap<&String, &serde_yaml::Value> = options.iter().collect();
+    format!("{:?}", ordered)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn opt(v: &str) -> serde_yaml::Value {
+        serde_yaml::Value::String(v.to_string())
+    }
+
+    fn scratch_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "media-tool-pipeline-{}-{}",
+            tag,
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Bug 1 regression: when the LLM prepper replaces the declared negative, the
+    /// sidecar must record the negative that was actually sent to the provider.
+    #[test]
+    fn variant_sidecar_records_effective_negative() {
+        let declared = "declared-negative-never-sent";
+        let effective = "effective-negative-actually-sent";
+        assert_ne!(declared, effective);
+
+        let gen = GenerationInputs::new(
+            "condensed prompt text".to_string(),
+            Some(effective.to_string()),
+        );
+
+        let dir = scratch_dir("sidecar");
+        let asset = dir.join("asset.png");
+        write_variant_metadata(&asset, "gemini", "some-model", &gen, &HashMap::new());
+
+        let sidecar = std::fs::read_to_string(asset.with_extension("metadata.yaml")).unwrap();
+        assert!(
+            sidecar.contains(effective),
+            "sidecar must record the negative that was sent: {sidecar}"
+        );
+        assert!(
+            !sidecar.contains(declared),
+            "sidecar must not record a negative that was never sent: {sidecar}"
+        );
+        assert!(sidecar.contains("condensed prompt text"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A generation that keeps the declared negative still records it.
+    #[test]
+    fn variant_sidecar_records_declared_negative_when_unchanged() {
+        let gen = GenerationInputs::new("text".to_string(), Some("declared".to_string()));
+        let dir = scratch_dir("sidecar-declared");
+        let asset = dir.join("asset.png");
+        write_variant_metadata(&asset, "gemini", "some-model", &gen, &HashMap::new());
+        let sidecar = std::fs::read_to_string(asset.with_extension("metadata.yaml")).unwrap();
+        assert!(sidecar.contains("declared"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Bug 2 regression: the `Options:` line must be byte-stable across renders of
+    /// the same input, whatever order the HashMap happens to iterate in.
+    #[test]
+    fn provider_options_line_is_deterministic() {
+        let keys = [
+            "zulu", "alpha", "mike", "bravo", "yankee", "charlie", "tango", "delta", "sierra",
+            "echo", "romeo", "foxtrot",
+        ];
+
+        let mut first: Option<String> = None;
+        for _ in 0..64 {
+            let map: HashMap<String, serde_yaml::Value> = keys
+                .iter()
+                .map(|k| (k.to_string(), opt(&format!("v-{k}"))))
+                .collect();
+            let rendered = format_provider_options(&map);
+            match &first {
+                None => first = Some(rendered),
+                Some(prev) => assert_eq!(prev, &rendered, "Options rendering must be stable"),
+            }
+        }
+
+        let rendered = first.unwrap();
+        let mut sorted = keys.to_vec();
+        sorted.sort_unstable();
+        let positions: Vec<usize> = sorted
+            .iter()
+            .map(|k| rendered.find(&format!("\"{k}\"")).unwrap())
+            .collect();
+        assert!(
+            positions.windows(2).all(|w| w[0] < w[1]),
+            "keys must be emitted in sorted order: {rendered}"
+        );
+    }
+
+    /// Shape guard: sorting must not change the rendering of the line otherwise.
+    #[test]
+    fn provider_options_line_shape_matches_debug_form() {
+        let mut map: HashMap<String, serde_yaml::Value> = HashMap::new();
+        map.insert("only".to_string(), opt("value"));
+        assert_eq!(format_provider_options(&map), format!("{map:?}"));
     }
 }

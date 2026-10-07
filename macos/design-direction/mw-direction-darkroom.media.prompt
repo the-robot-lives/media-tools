@@ -1,0 +1,35 @@
+# Media Workbench — macOS UX direction mockup: Darkroom
+schema: "0.4"
+id: mw-direction-darkroom
+type: image
+service: gemini
+model: gemini-3-pro-image
+quality: high
+prompt:
+  text: |
+    A macOS desktop application window, near-black minimal chrome. One large generated artwork centred and dominant, softly vignetted on a neutral dark field. A horizontal filmstrip of four smaller image thumbnails below, each with a small circular score badge. Thin collapsed toolbar at top. The interface recedes; the image is the subject. Lightroom-like restraint.
+  negative: >
+    garbled text, lorem ipsum, watermark, logo, photorealistic human,
+    mobile phone frame, browser chrome, Windows UI, web page, tablet, iPhone
+  style: "UI design mockup, straight-on screenshot framing, no perspective, no camera tilt"
+output:
+  formats:
+    - format: png
+      quality: 95
+  dimensions:
+    width: 2560
+    height: 1600
+    aspect_ratio: "16:10"
+eval:
+  pass_threshold: 0.7
+  criteria:
+    direction_legible:
+      weight: 0.4
+      description: "palette, density and material read clearly at a glance"
+    macos_native:
+      weight: 0.3
+      description: "reads as a Mac desktop application window"
+    distinct:
+      weight: 0.3
+      description: "not interchangeable with the other four directions"
+tags: [design-direction, macos, media-workbench]

@@ -5,8 +5,10 @@ use base64::Engine;
 use serde_json::json;
 
 use crate::attachments::LoadedAttachment;
+use crate::imagefmt;
 use crate::providers::{GenerationOptions, MediaProvider};
-use crate::ui;
+use crate::telemetry as tel;
+use crate::telemetry::progress;
 
 const MAX_RETRIES: u32 = 3;
 const INITIAL_BACKOFF_SECS: u64 = 2;
@@ -16,6 +18,57 @@ const INITIAL_BACKOFF_SECS: u64 = 2;
 const GENERATE_CONTENT_MODEL: &str = "gemini-3.1-flash-image";
 
 pub struct GeminiProvider;
+
+
+/// Gemini API root. `provider_options.base_url` overrides it, which is how the tests point the
+/// provider at a stub server; it also serves as an escape hatch for a proxy or mirror.
+fn api_root(options: &GenerationOptions) -> String {
+    options
+        .provider_options
+        .get("base_url")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim_end_matches('/'))
+        .filter(|s| !s.is_empty())
+        .unwrap_or("https://generativelanguage.googleapis.com")
+        .to_string()
+}
+
+/// Write provider bytes so the file's contents match its name.
+///
+/// Gemini returns JPEG whatever `output.format` a prompt declares. Writing those bytes to a
+/// `.png` path used to report success and then break post-processing one step later with
+/// "cannot decode". Transcode to what was asked for, and if that is impossible, write under
+/// the true extension and say so.
+fn write_reconciled(output_path: &Path, bytes: &[u8]) -> color_eyre::Result<std::path::PathBuf> {
+    let (written, outcome) = imagefmt::write_image_reconciled(output_path, bytes)?;
+    match outcome {
+        imagefmt::WriteOutcome::AsRequested => {}
+        imagefmt::WriteOutcome::Transcoded { from, to } => {
+            tel::verbose(&format!(
+                "Gemini returned {:?}; transcoded to {:?} as declared by the prompt",
+                from, to
+            ));
+        }
+        imagefmt::WriteOutcome::Renamed { ref to, kind } => {
+            tel::warn_msg(&format!(
+                "Gemini returned {:?}, which cannot be written as '{}' \u{2014} wrote {} instead",
+                kind,
+                output_path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("(none)"),
+                to.display()
+            ));
+        }
+        imagefmt::WriteOutcome::Unknown => {
+            tel::warn_msg(&format!(
+                "Gemini returned bytes in an unrecognised container; wrote {} verbatim",
+                written.display()
+            ));
+        }
+    }
+    Ok(written)
+}
 
 #[async_trait::async_trait]
 impl MediaProvider for GeminiProvider {
@@ -91,8 +144,10 @@ impl GeminiProvider {
         options: &GenerationOptions,
     ) -> color_eyre::Result<bool> {
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:predict?key={}",
-            options.model, api_key
+            "{}/v1beta/models/{}:predict?key={}",
+            api_root(options),
+            options.model,
+            api_key
         );
 
         let mut params = json!({ "sampleCount": 1 });
@@ -121,12 +176,12 @@ impl GeminiProvider {
         });
 
         if options.verbose {
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "POST {}?key=***",
                 url.split('?').next().unwrap_or(&url)
             ));
             let preview: String = prompt_text.chars().take(120).collect();
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "Prompt: {}{}",
                 preview,
                 if prompt_text.len() > 120 { "..." } else { "" }
@@ -142,7 +197,7 @@ impl GeminiProvider {
 
         let predictions = result["predictions"].as_array();
         if predictions.is_none() || predictions.unwrap().is_empty() {
-            ui::fail_msg(&format!(
+            tel::fail_msg(&format!(
                 "No predictions returned for {}",
                 output_path.display()
             ));
@@ -153,15 +208,12 @@ impl GeminiProvider {
             .as_str()
             .unwrap_or("");
         if image_b64.is_empty() {
-            ui::fail_msg(&format!("Empty image data for {}", output_path.display()));
+            tel::fail_msg(&format!("Empty image data for {}", output_path.display()));
             return Ok(false);
         }
 
         let image_bytes = base64::engine::general_purpose::STANDARD.decode(image_b64)?;
-        if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(output_path, &image_bytes)?;
+        write_reconciled(output_path, &image_bytes)?;
         Ok(true)
     }
 
@@ -181,8 +233,10 @@ impl GeminiProvider {
             .unwrap_or(&options.model);
 
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            model, api_key
+            "{}/v1beta/models/{}:generateContent?key={}",
+            api_root(options),
+            model,
+            api_key
         );
 
         let mut parts: Vec<serde_json::Value> = Vec::new();
@@ -212,18 +266,18 @@ impl GeminiProvider {
         });
 
         if options.verbose {
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "POST {}?key=*** (generateContent with {} attachment(s))",
                 url.split('?').next().unwrap_or(&url),
                 attachments.len()
             ));
             let preview: String = prompt_text.chars().take(120).collect();
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "Prompt: {}{}",
                 preview,
                 if prompt_text.len() > 120 { "..." } else { "" }
             ));
-            ui::verbose(&format!("Model: {} (generateContent)", model));
+            tel::verbose(&format!("Model: {} (generateContent)", model));
         }
 
         let result = self
@@ -236,7 +290,7 @@ impl GeminiProvider {
         // Extract image from generateContent response
         let candidates = result["candidates"].as_array();
         if candidates.is_none() || candidates.unwrap().is_empty() {
-            ui::fail_msg(&format!(
+            tel::fail_msg(&format!(
                 "No candidates in response for {}",
                 output_path.display()
             ));
@@ -251,10 +305,7 @@ impl GeminiProvider {
                     if !image_b64.is_empty() {
                         let image_bytes =
                             base64::engine::general_purpose::STANDARD.decode(image_b64)?;
-                        if let Some(parent) = output_path.parent() {
-                            std::fs::create_dir_all(parent)?;
-                        }
-                        std::fs::write(output_path, &image_bytes)?;
+                        write_reconciled(output_path, &image_bytes)?;
                         return Ok(true);
                     }
                 }
@@ -265,9 +316,9 @@ impl GeminiProvider {
         if options.verbose {
             let resp_preview = serde_json::to_string_pretty(&result).unwrap_or_default();
             let truncated: String = resp_preview.chars().take(500).collect();
-            ui::verbose(&format!("Response (no image found): {}", truncated));
+            tel::verbose(&format!("Response (no image found): {}", truncated));
         }
-        ui::fail_msg(&format!(
+        tel::fail_msg(&format!(
             "No image data in response for {}",
             output_path.display()
         ));
@@ -286,6 +337,12 @@ impl GeminiProvider {
         let mut backoff = INITIAL_BACKOFF_SECS;
 
         for attempt in 1..=MAX_RETRIES {
+            progress::provider_request(
+                "gemini",
+                "",
+                url.split('?').next().unwrap_or(url),
+                attempt as usize,
+            );
             let resp = client
                 .post(url)
                 .header("Content-Type", "application/json")
@@ -297,6 +354,12 @@ impl GeminiProvider {
             match resp {
                 Ok(response) => {
                     let status = response.status();
+                    progress::provider_response(
+                        "gemini",
+                        status.as_u16(),
+                        status.is_success(),
+                        attempt as usize,
+                    );
                     if status.is_success() {
                         let result: serde_json::Value = response.json().await?;
                         return Ok(Some(result));
@@ -307,7 +370,13 @@ impl GeminiProvider {
 
                     match status_code {
                         429 if attempt < MAX_RETRIES => {
-                            ui::warn_msg(&format!(
+                            progress::provider_retry(
+                                "gemini",
+                                attempt as usize,
+                                backoff * 1000,
+                                "rate limited (429)",
+                            );
+                            tel::warn_msg(&format!(
                                 "Rate limited (429), retrying in {}s (attempt {}/{})",
                                 backoff, attempt, MAX_RETRIES
                             ));
@@ -316,7 +385,7 @@ impl GeminiProvider {
                             continue;
                         }
                         429 => {
-                            ui::fail_msg(&format!(
+                            tel::fail_msg(&format!(
                                 "Rate limited after {} retries: {}",
                                 MAX_RETRIES,
                                 output_path.display()
@@ -325,13 +394,13 @@ impl GeminiProvider {
                         }
                         400 => {
                             let preview: String = error_body.chars().take(300).collect();
-                            ui::fail_msg(&format!(
+                            tel::fail_msg(&format!(
                                 "Bad request (400) for {}: {}",
                                 output_path.display(),
                                 preview
                             ));
                             if verbose {
-                                ui::verbose(&error_body);
+                                tel::verbose(&error_body);
                             }
                             return Ok(None);
                         }
@@ -345,7 +414,7 @@ impl GeminiProvider {
                         }
                         _ => {
                             let preview: String = error_body.chars().take(200).collect();
-                            ui::fail_msg(&format!(
+                            tel::fail_msg(&format!(
                                 "HTTP {} for {}: {}",
                                 status_code,
                                 output_path.display(),
@@ -356,13 +425,20 @@ impl GeminiProvider {
                     }
                 }
                 Err(e) => {
-                    ui::fail_msg(&format!(
+                    progress::provider_response("gemini", 0, false, attempt as usize);
+                    tel::fail_msg(&format!(
                         "Network error for {}: {}",
                         output_path.display(),
                         e
                     ));
                     if attempt < MAX_RETRIES {
-                        ui::warn_msg(&format!(
+                        progress::provider_retry(
+                            "gemini",
+                            attempt as usize,
+                            backoff * 1000,
+                            "network error",
+                        );
+                        tel::warn_msg(&format!(
                             "Retrying in {}s (attempt {}/{})",
                             backoff, attempt, MAX_RETRIES
                         ));

@@ -1,0 +1,35 @@
+# Media Workbench — macOS UX direction mockup: System Native
+schema: "0.4"
+id: mw-direction-system-native
+type: image
+service: gemini
+model: gemini-3-pro-image
+quality: high
+prompt:
+  text: |
+    A macOS Sonoma desktop application window following Apple Human Interface Guidelines exactly. Three-pane layout: translucent vibrant sidebar source list, middle list of items, right inspector panel with form controls. SF Pro typography, system grey and blue accents, traffic-light window controls, rounded corners, subtle translucency. Looks like a stock Apple utility application.
+  negative: >
+    garbled text, lorem ipsum, watermark, logo, photorealistic human,
+    mobile phone frame, browser chrome, Windows UI, web page, tablet, iPhone
+  style: "UI design mockup, straight-on screenshot framing, no perspective, no camera tilt"
+output:
+  formats:
+    - format: png
+      quality: 95
+  dimensions:
+    width: 2560
+    height: 1600
+    aspect_ratio: "16:10"
+eval:
+  pass_threshold: 0.7
+  criteria:
+    direction_legible:
+      weight: 0.4
+      description: "palette, density and material read clearly at a glance"
+    macos_native:
+      weight: 0.3
+      description: "reads as a Mac desktop application window"
+    distinct:
+      weight: 0.3
+      description: "not interchangeable with the other four directions"
+tags: [design-direction, macos, media-workbench]

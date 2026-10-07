@@ -5,7 +5,8 @@ use serde_json::json;
 
 use crate::attachments::LoadedAttachment;
 use crate::providers::{ChatProvider, GenerationOptions};
-use crate::ui;
+use crate::telemetry as tel;
+use crate::telemetry::progress;
 
 pub struct GeminiChatProvider;
 
@@ -78,18 +79,24 @@ impl ChatProvider for GeminiChatProvider {
         }
 
         if options.verbose {
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "POST {}?key=***",
                 url.split('?').next().unwrap_or(&url)
             ));
             let preview: String = user_prompt.chars().take(120).collect();
-            ui::verbose(&format!(
+            tel::verbose(&format!(
                 "Prompt: {}{}",
                 preview,
                 if user_prompt.len() > 120 { "..." } else { "" }
             ));
         }
 
+        progress::provider_request(
+            "gemini-chat",
+            &options.model,
+            url.split('?').next().unwrap_or(&url),
+            1,
+        );
         let client = reqwest::Client::new();
         let resp = client
             .post(&url)
@@ -102,10 +109,16 @@ impl ChatProvider for GeminiChatProvider {
         match resp {
             Ok(response) => {
                 let status = response.status();
+                progress::provider_response(
+                    "gemini-chat",
+                    status.as_u16(),
+                    status.is_success(),
+                    1,
+                );
                 if !status.is_success() {
                     let error_body = response.text().await.unwrap_or_default();
                     let preview: String = error_body.chars().take(300).collect();
-                    ui::fail_msg(&format!(
+                    tel::fail_msg(&format!(
                         "HTTP {} for {}: {}",
                         status.as_u16(),
                         output_path.display(),
@@ -132,7 +145,7 @@ impl ChatProvider for GeminiChatProvider {
                         Ok(true)
                     }
                     None => {
-                        ui::fail_msg(&format!(
+                        tel::fail_msg(&format!(
                             "No text content in response for {}",
                             output_path.display()
                         ));
@@ -141,7 +154,8 @@ impl ChatProvider for GeminiChatProvider {
                 }
             }
             Err(e) => {
-                ui::fail_msg(&format!(
+                progress::provider_response("gemini-chat", 0, false, 1);
+                tel::fail_msg(&format!(
                     "Network error for {}: {}",
                     output_path.display(),
                     e

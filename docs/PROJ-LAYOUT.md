@@ -4,11 +4,12 @@
 media-tool/
 ├── src/                            # Rust source (CLI + test-lab server) → [layout/src.md](layout/src.md)
 │   ├── main.rs                     #   CLI entry point (clap, pipeline orchestration)
+│   ├── lib.rs                      #   Library surface — all logic reusable by GUI front-ends
 │   ├── schema.rs                   #   .media.prompt YAML parsing and normalization
 │   ├── provider_config.rs          #   Runtime provider config loader (media-tool.yaml)
 │   ├── test_lab/                   #   Local eval/test-lab web server → [layout/src.md](layout/src.md)
 │   ├── providers/                  #   16 provider implementations → [layout/src.md](layout/src.md)
-│   └── renderers/                  #   5 markup → visual renderers → [layout/src.md](layout/src.md)
+│   └── renderers/                  #   4 markup → visual renderers → [layout/src.md](layout/src.md)
 ├── bin/                            # Shell entry points
 │   ├── generate-media-prompt       #   Bash wrapper (k8-lib, Python engine dispatch)
 │   └── media-eval-port-forward     #   kubectl port-forward for in-cluster eval proxy
@@ -24,6 +25,9 @@ media-tool/
 │   └── mix.exs / mix.lock          #   Elixir deps (phoenix, hologram, bandit)
 ├── helm/                           # Deployment charts for the landing site
 │   └── media-tool-landing/         #   Chart + values; wraps static-site subchart
+├── macos/                          # Native macOS desktop app (SwiftUI)
+│   ├── MediaWorkbench/             #   SwiftUI shell + tobor-kit integration; reads/writes real media-tool.yaml (Swift package: Sources, Tests)
+│   └── design-direction/           #   Themed mockup prompts + rendered PNGs for the app UI
 ├── demos/                          # Working .media.prompt examples by asset type
 │   ├── image/                      #   Hero images, logos (Gemini Imagen)
 │   ├── svg/                        #   SVG illustrations (chat + render)
@@ -51,10 +55,12 @@ media-tool/
 │   ├── PROJ-LAYOUT.md              #   This file
 │   ├── PROJ-LAYOUT.summary.md      #   Quick-reference tree
 │   ├── PROJ-ARCH.md / .summary.md  #   Architecture doc
+│   ├── PROJ-SCHEMA.md / .summary.md  # .media.prompt schema reference
 │   ├── PROJ-FAQ.md / .summary.md   #   FAQ
 │   ├── PROJ-HOWTO.md / .summary.md #   How-to index
 │   ├── howto/                      #   Task guides (first-hour, dependencies, rich formats, troubleshooting)
 │   ├── layout/                     #   Detailed breakdowns (src.md)
+│   ├── design/                     #   Design docs (media-workbench.md — macOS app direction)
 │   ├── providers.md                #   Provider implementation guide
 │   ├── quality-selection-and-eval.md  # Quality selection + eval system design
 │   ├── eval-criteria-catalog.md    #   Eval criteria reference
@@ -68,6 +74,7 @@ media-tool/
 ├── media-tool.yaml                 # Runtime provider/model config (defaults, tiers, limits)
 ├── HOW-TO.md                       # Quick reference for writing .media.prompt files
 ├── CLAUDE.md                       # Claude Code agent guidance (commands, monorepo rules)
+├── AGENT.md / AGENTS.md            # Multi-agent (Grok Build) guidance, kept aligned with CLAUDE.md
 ├── CHANGELOG.md                    # Release changelog
 ├── LICENSE                         # License file
 └── README.md                       # Full user documentation (schema, CLI, providers)

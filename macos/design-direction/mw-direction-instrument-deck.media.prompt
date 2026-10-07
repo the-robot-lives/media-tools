@@ -1,0 +1,35 @@
+# Media Workbench — macOS UX direction mockup: Instrument Deck
+schema: "0.4"
+id: mw-direction-instrument-deck
+type: image
+service: gemini
+model: gemini-3-pro-image
+quality: high
+prompt:
+  text: |
+    A macOS desktop application window, dark professional interface like a pro audio workstation. Left sidebar listing queued generation runs. Centre: a large active panel with a progress bar and elapsed time. Right rail: vertical meters and numeric readouts in monospace. Near-black #0B0E12 panels, teal #4FD1C5 accents, one amber warning indicator. Flat surfaces, faint panel seams, subtle glow on active elements.
+  negative: >
+    garbled text, lorem ipsum, watermark, logo, photorealistic human,
+    mobile phone frame, browser chrome, Windows UI, web page, tablet, iPhone
+  style: "UI design mockup, straight-on screenshot framing, no perspective, no camera tilt"
+output:
+  formats:
+    - format: png
+      quality: 95
+  dimensions:
+    width: 2560
+    height: 1600
+    aspect_ratio: "16:10"
+eval:
+  pass_threshold: 0.7
+  criteria:
+    direction_legible:
+      weight: 0.4
+      description: "palette, density and material read clearly at a glance"
+    macos_native:
+      weight: 0.3
+      description: "reads as a Mac desktop application window"
+    distinct:
+      weight: 0.3
+      description: "not interchangeable with the other four directions"
+tags: [design-direction, macos, media-workbench]
