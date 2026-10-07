@@ -39,7 +39,7 @@ pub struct PipelineConfig {
     pub allow_unimplemented_post: bool,
 }
 
-// ⟦𓈎𓄂𓅪𓅙⟧ run_generation :: auto-generated pointer for public function run_generation
+// <REMOVED UUID HERE> run_generation :: auto-generated pointer for public function run_generation
 pub async fn run_generation(
     prompts: Vec<ParsedPrompt>,
     config: &PipelineConfig,

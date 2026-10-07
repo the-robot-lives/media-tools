@@ -12,7 +12,7 @@ use crate::telemetry::progress;
 
 const REFINE_MODEL: &str = "gemini-3.7-flash";
 
-// ⟦𓈩𓅏𓇩𓐁⟧ interactive_refine_loop :: auto-generated pointer for public function interactive_refine_loop
+// <REMOVED UUID HERE> interactive_refine_loop :: auto-generated pointer for public function interactive_refine_loop
 pub async fn interactive_refine_loop(
     prompt: &mut ParsedPrompt,
     output_paths: &[std::path::PathBuf],

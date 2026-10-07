@@ -38,7 +38,7 @@ impl ChatProvider for OpenAiChatProvider {
     }
 }
 
-// ⟦𓂱𓅑𓄀𓄵⟧ openai_compatible_generate :: auto-generated pointer for public function openai_compatible_generate
+// <REMOVED UUID HERE> openai_compatible_generate :: auto-generated pointer for public function openai_compatible_generate
 pub async fn openai_compatible_generate(
     url: &str,
     system_prompt: &str,
