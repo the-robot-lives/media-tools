@@ -1,0 +1,7 @@
+service: gemini
+model: gemini-3-pro-image
+timestamp: 1788208734
+prompt: |
+  Minimal Swiss-design poster style composition on warm off-white paper texture: one small white card with faint grey YAML indentation lines positioned in the lower right third, one flat geometric hexagon outline in deep indigo above it, vast empty whitespace, single hairline rule across the upper third, museum-catalog restraint, soft even daylight, no gradients
+negative: |
+  dark background, neon, 3d, gloss, clutter, multiple cards, text, people

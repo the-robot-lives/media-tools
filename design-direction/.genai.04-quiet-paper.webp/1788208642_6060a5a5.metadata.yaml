@@ -1,0 +1,9 @@
+service: gemini
+model: gemini-3-pro-image
+timestamp: 1788208672
+eval_score: 0.557
+eval_notes: "The artifact appears to be a vertical strip containing multiple crops or a tiled generation rather than a single coherent poster. While the top section accurately depicts the requested elements (card, hexagon, rule), the presence of repeated elements (multiple hexagons and cards visible across the strip) violates the constraint of having no more than two visual elements."
+prompt: |
+  Minimal Swiss-design poster style composition on warm off-white paper texture: one small white card with faint grey YAML indentation lines positioned in the lower right third, one flat geometric hexagon outline in deep indigo above it, vast empty whitespace, single hairline rule across the upper third, museum-catalog restraint, soft even daylight, no gradients
+negative: |
+  dark background, neon, 3d, gloss, clutter, multiple cards, text, people

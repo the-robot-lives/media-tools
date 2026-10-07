@@ -1,0 +1,9 @@
+service: gemini
+model: gemini-3-pro-image
+timestamp: 1788208711
+eval_score: 0.800
+eval_notes: "The image perfectly captures the specific content requested: four distinct tiles (abstract, waveform, film frame, polygon) on a conveyor moving toward a violet-amber light source. The palette is cohesive and the lighting is high contrast. However, the composition is vertical (portrait) rather than the requested 'wide composition', which significantly impacts the layout utility despite the top-left space being relatively clear."
+prompt: |
+  Stylized 3D illustration of a dark automated assembly line producing media: four glowing rounded tiles in a row showing an abstract image, an audio waveform, a film frame, and a vector polygon, carried on a sleek conveyor toward a bright violet-amber gradient light source, soft volumetric glow, matte dark-indigo environment, high contrast, wide composition with calm space at top-left for a headline
+negative: |
+  realistic factory, robots, people, text, busy clutter, daylight, flat 2d

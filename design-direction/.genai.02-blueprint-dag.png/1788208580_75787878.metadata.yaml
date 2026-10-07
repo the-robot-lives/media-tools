@@ -1,0 +1,9 @@
+service: gemini
+model: gemini-3-pro-image
+timestamp: 1788208620
+eval_score: 0.971
+eval_notes: "The image perfectly captures the technical blueprint aesthetic. The top panel displays a valid DAG with 6 nodes (fitting the 5-7 range), flowing left to right with cyan arrows. One node is clearly glowing and labeled 'ACTIVE'. The composition leaves the left third empty as requested. The technical details, including the grid, registration marks, and measurement lines, are crisp and precise. The image appears to be a vertical stack of crops, but the primary content fully satisfies the prompt."
+prompt: |
+  Technical blueprint illustration of a small directed acyclic graph: five to seven rectangular nodes connected by thin cyan arrows flowing left to right, one node glowing as active, drawn in precise engineering linework on dark navy grid paper with faint measurement marks and corner registration marks, monospaced labels suggested as small dashes, wide cinematic composition with empty space on the left third
+negative: |
+  photo, 3d render, colorful, warm tones, cartoon, text-heavy, human figures

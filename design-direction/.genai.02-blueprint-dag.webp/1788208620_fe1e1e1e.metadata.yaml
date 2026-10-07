@@ -1,0 +1,7 @@
+service: gemini
+model: gemini-3-pro-image
+timestamp: 1788208639
+prompt: |
+  Technical blueprint illustration of a small directed acyclic graph: five to seven rectangular nodes connected by thin cyan arrows flowing left to right, one node glowing as active, drawn in precise engineering linework on dark navy grid paper with faint measurement marks and corner registration marks, monospaced labels suggested as small dashes, wide cinematic composition with empty space on the left third
+negative: |
+  photo, 3d render, colorful, warm tones, cartoon, text-heavy, human figures

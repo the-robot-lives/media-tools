@@ -1,0 +1,9 @@
+service: gemini
+model: gemini-3-pro-image
+timestamp: 1788208609
+eval_score: 0.471
+eval_notes: "The image appears to be a vertical strip containing repeating instances of the requested elements (hexagon, card, rule), rather than a single composition. This results in multiple visual elements, triggering the rejection criteria. The top section adheres well to the prompt's placement and style (Swiss design, off-white paper, indigo hexagon), but the repetition ruins the 'vast empty whitespace' and 'museum-catalog restraint'. The card features horizontal lines rather than specific YAML indentat"
+prompt: |
+  Minimal Swiss-design poster style composition on warm off-white paper texture: one small white card with faint grey YAML indentation lines positioned in the lower right third, one flat geometric hexagon outline in deep indigo above it, vast empty whitespace, single hairline rule across the upper third, museum-catalog restraint, soft even daylight, no gradients
+negative: |
+  dark background, neon, 3d, gloss, clutter, multiple cards, text, people

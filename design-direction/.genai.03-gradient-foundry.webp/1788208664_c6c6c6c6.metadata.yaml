@@ -1,0 +1,9 @@
+service: gemini
+model: gemini-3-pro-image
+timestamp: 1788208707
+eval_score: 0.857
+eval_notes: "The image perfectly captures the requested subject matter: four distinct tiles (abstract swirl, audio waveform, film strip, vector polygon) on a conveyor belt moving toward a violet-amber light source. The lighting and environment (matte dark-indigo, volumetric glow) are excellent. However, the composition score is lower because the prompt requested a 'wide composition,' but the generated image is vertical (portrait orientation), which limits its usability as a wide banner despite having the req"
+prompt: |
+  Stylized 3D illustration of a dark automated assembly line producing media: four glowing rounded tiles in a row showing an abstract image, an audio waveform, a film frame, and a vector polygon, carried on a sleek conveyor toward a bright violet-amber gradient light source, soft volumetric glow, matte dark-indigo environment, high contrast, wide composition with calm space at top-left for a headline
+negative: |
+  realistic factory, robots, people, text, busy clutter, daylight, flat 2d

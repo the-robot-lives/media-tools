@@ -1,0 +1,9 @@
+service: gemini
+model: gemini-3-pro-image
+timestamp: 1788208644
+eval_score: 0.971
+eval_notes: "The image perfectly adheres to the prompt. The composition provides ample negative space on the left as requested, making it ideal for a headline. The technical execution of the frosted glass and glowing indigo-violet edges is high quality. The YAML code is legible, correctly formatted, and contains the required keywords ('schema', 'quality'). The background features the requested faint hexagon watermark."
+prompt: |
+  Dark editorial tech hero image: a single floating frosted-glass panel displaying YAML code (indented key-value lines, visible words 'schema' and 'quality'), tilted slightly in 3D perspective, glowing indigo-violet edge light, deep near-black navy background with faint geometric hexagon watermark, monospaced typography, cinematic rim lighting, generous negative space on the left for headline text
+negative: |
+  cartoon, cluttered, multiple panels, human figures, logos, readable full paragraphs, watermark text

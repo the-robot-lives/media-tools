@@ -1,0 +1,9 @@
+service: gemini
+model: gemini-3-pro-image
+timestamp: 1788208638
+eval_score: 0.700
+eval_notes: "The image accurately depicts the four specific media tiles (abstract, audio, film, polygon) and the lighting environment. However, it fails the composition constraints: the aspect ratio is tall (portrait) instead of wide, and the negative space is located at the bottom of the frame rather than the top-left as requested."
+prompt: |
+  Stylized 3D illustration of a dark automated assembly line producing media: four glowing rounded tiles in a row showing an abstract image, an audio waveform, a film frame, and a vector polygon, carried on a sleek conveyor toward a bright violet-amber gradient light source, soft volumetric glow, matte dark-indigo environment, high contrast, wide composition with calm space at top-left for a headline
+negative: |
+  realistic factory, robots, people, text, busy clutter, daylight, flat 2d
