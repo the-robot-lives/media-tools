@@ -89,7 +89,8 @@ jobs:
           push: false
           tags: media-tool-site:ci
           cache-from: type=gha,scope=web
-          cache-to: type=gha,scope=web,mode=max
+          # PRs restore only; develop/main pushes export (stops PR cache churn).
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,scope=web,mode=max' || '' }}
       - name: Probe home page content
         run: |
           docker run -d --name mt-site -p 8132:8132 media-tool-site:ci
