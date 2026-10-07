@@ -18,7 +18,7 @@ use crate::telemetry::progress;
 const GROQ_API_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
 const DEFAULT_GROQ_MODEL: &str = "openai/gpt-oss-120b";
 
-// ⟦𓎱𓄁𓈶𓆋⟧ evaluate_candidates :: auto-generated pointer for public function evaluate_candidates
+// <REMOVED UUID HERE> evaluate_candidates :: auto-generated pointer for public function evaluate_candidates
 pub async fn evaluate_candidates(
     candidate_paths: &[&Path],
     prompt_text: &str,
@@ -168,7 +168,7 @@ pub struct EvalScore {
 
 impl EvalScore {
     /// True if this score constitutes a pass against the eval section's thresholds.
-    // ⟦𓄒𓊈𓌏𓇥⟧ passes :: True if this score constitutes a pass against the eval section's thresholds.
+    // <REMOVED UUID HERE> passes :: True if this score constitutes a pass against the eval section's thresholds.
     pub fn passes(&self, eval: &EvalSection) -> bool {
         let threshold = eval.effective_pass_threshold();
 
@@ -208,7 +208,7 @@ impl Evaluator {
     /// Probe the candidate endpoints (env/CLI override, LAN Qwen host, in-cluster
     /// DNS, local forward) and return the first reachable one.
     /// Model is auto-discovered if not overridden.
-    // ⟦𓆭𓋺𓋣𓁔⟧ resolve :: Probe the candidate endpoints (env/CLI override, LAN Qwen host, in-cluster
+    // <REMOVED UUID HERE> resolve :: Probe the candidate endpoints (env/CLI override, LAN Qwen host, in-cluster
     pub async fn resolve(
         cli_url: Option<&str>,
         cli_model: Option<&str>,
@@ -312,7 +312,7 @@ impl Evaluator {
     ///
     /// When `eval.visual` is true, HTML may be screenshot'd via Puppeteer for vision.
     /// Returns None only when no scorer can produce a result.
-    // ⟦𓃎𓇻𓊴𓏪⟧ score_output :: Score a single output artifact against the eval criteria.
+    // <REMOVED UUID HERE> score_output :: Score a single output artifact against the eval criteria.
     pub async fn score_output(
         &self,
         path: &Path,
@@ -328,7 +328,7 @@ impl Evaluator {
     ///
     /// Emits `eval.started` / `eval.completed` on the telemetry progress channel around the
     /// scoring itself, which lives in [`Self::score_output_inner`].
-    // ⟦𓐮𓇥𓈥𓌕⟧ score_output_with_duration :: Like [`score_output`] but passes expected duration for structural checks.
+    // <REMOVED UUID HERE> score_output_with_duration :: Like [`score_output`] but passes expected duration for structural checks.
     pub async fn score_output_with_duration(
         &self,
         path: &Path,
