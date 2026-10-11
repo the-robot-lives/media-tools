@@ -56,6 +56,11 @@ RUN chown nobody /app
 
 ENV MIX_ENV=prod
 
+# Hologram.env/0 reads HOLOGRAM_ENV || MIX_ENV at RUNTIME and falls back to
+# :dev when neither is set (true in a mix release) — which disables the
+# Hologram router and 404s every page. Pin the env explicitly.
+ENV HOLOGRAM_ENV=prod
+
 COPY --from=build --chown=nobody:root /app/_build/${MIX_ENV}/rel/media_tool_web ./
 
 USER nobody
