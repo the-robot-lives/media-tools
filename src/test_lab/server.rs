@@ -475,6 +475,27 @@ async fn api_graph(State(st): State<AppState>) -> Result<Json<serde_json::Value>
             AssetType::Diagram,
             AudioKind::Voice,
         ),
+        (
+            "cli-tool-mockup",
+            "CLI tool mockup",
+            "Interactive terminal mockups as self-contained HTML (noizu-cli-mockup)",
+            AssetType::CliToolMockup,
+            AudioKind::Voice,
+        ),
+        (
+            "js-shell",
+            "JS shell pack",
+            "SemTextShell-compatible command packs (.mjs ES modules)",
+            AssetType::JsShell,
+            AudioKind::Voice,
+        ),
+        (
+            "text-video",
+            "Text video (vhs tape)",
+            "charmbracelet vhs .tape scripts — terminal GIFs from a chat model",
+            AssetType::TextVideo,
+            AudioKind::Voice,
+        ),
     ];
 
     let mut media_children = Vec::new();
@@ -766,6 +787,27 @@ async fn api_kinds(State(st): State<AppState>) -> Result<Json<serde_json::Value>
             "Style guide",
             "Design-system style guide pages.",
             AssetType::StyleGuide,
+            AudioKind::Voice,
+        ),
+        (
+            "cli-tool-mockup",
+            "CLI tool mockup",
+            "Interactive terminal mockups served as a self-contained HTML page.",
+            AssetType::CliToolMockup,
+            AudioKind::Voice,
+        ),
+        (
+            "js-shell",
+            "JS shell pack",
+            "SemTextShell-compatible ES-module command packs.",
+            AssetType::JsShell,
+            AudioKind::Voice,
+        ),
+        (
+            "text-video",
+            "Text video (vhs tape)",
+            "charmbracelet vhs .tape scripts rendered locally to GIF.",
+            AssetType::TextVideo,
             AudioKind::Voice,
         ),
     ];
@@ -2068,7 +2110,11 @@ fn normalize_formats(existing: Option<&serde_yaml::Value>, default_ext: &str) ->
 
 fn default_ext_for_channel(tf: &str) -> &'static str {
     let t = tf.to_lowercase();
-    if t.contains("mermaid") {
+    if t == "tape" || t.contains("vhs") {
+        "tape"
+    } else if t == "js-shell" || t == "mjs" {
+        "mjs"
+    } else if t.contains("mermaid") {
         "mmd"
     } else if t.contains("plantuml") || t == "puml" {
         "puml"
@@ -2096,9 +2142,11 @@ fn default_ext_for_type(type_key: &str) -> &'static str {
         "image" | "svg" => "png",
         "video" => "mp4",
         "music" | "voice" | "audio" | "sfx" => "mp3",
-        "html" | "game" | "style-guide" => "html",
+        "html" | "game" | "style-guide" | "cli-tool-mockup" => "html",
         "react-page" | "component" => "tsx",
         "diagram" => "mmd",
+        "js-shell" => "mjs",
+        "text-video" => "tape",
         _ => "md",
     }
 }

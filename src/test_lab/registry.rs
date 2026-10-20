@@ -177,6 +177,9 @@ pub fn build_catalog(demos_dir: &Path, package_root: &Path) -> ProviderCatalog {
                     "react-page".into(),
                     "component".into(),
                     "document".into(),
+                    "cli-tool-mockup".into(),
+                    "js-shell".into(),
+                    "text-video".into(),
                 ],
                 default_extension: None,
                 api_key_env: Some(api_key_env(row.slug).into()),
@@ -222,7 +225,7 @@ pub fn build_catalog(demos_dir: &Path, package_root: &Path) -> ProviderCatalog {
                         ""
                     }
                 ),
-                asset_types: vec!["diagram".into(), "html".into()],
+                asset_types: row.asset_types.iter().map(|s| (*s).to_string()).collect(),
                 default_extension: Some(row.default_ext.into()),
                 api_key_env: None,
                 default_model: None,
@@ -678,6 +681,8 @@ struct RenderRow {
     description: &'static str,
     default_ext: &'static str,
     fim: Option<&'static str>,
+    /// Asset types this renderer consumes (shown in the provider graph).
+    asset_types: &'static [&'static str],
 }
 
 const RENDERER_TABLE: &[RenderRow] = &[
@@ -686,24 +691,35 @@ const RENDERER_TABLE: &[RenderRow] = &[
         description: "Mermaid CLI (mmdc)",
         default_ext: "svg",
         fim: Some("mermaid.md"),
+        asset_types: &["diagram", "html"],
     },
     RenderRow {
         slug: "plantuml",
         description: "PlantUML",
         default_ext: "svg",
         fim: Some("plantuml.md"),
+        asset_types: &["diagram", "html"],
     },
     RenderRow {
         slug: "graphviz",
         description: "Graphviz dot",
         default_ext: "svg",
         fim: Some("graphviz.md"),
+        asset_types: &["diagram", "html"],
     },
     RenderRow {
         slug: "puppeteer",
         description: "Puppeteer / Chromium screenshots",
         default_ext: "png",
         fim: Some("html.md"),
+        asset_types: &["diagram", "html"],
+    },
+    RenderRow {
+        slug: "vhs",
+        description: "charmbracelet VHS (tape → GIF)",
+        default_ext: "gif",
+        fim: Some("tape.md"),
+        asset_types: &["text-video"],
     },
 ];
 

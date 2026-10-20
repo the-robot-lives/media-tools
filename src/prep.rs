@@ -58,6 +58,7 @@ pub fn prep_channel(
     if matches!(
         tf.as_str(),
         "mermaid" | "mmd" | "plantuml" | "puml" | "graphviz" | "dot" | "drawio" | "wavedrom"
+            | "tape"
     ) {
         return PrepChannel::Diagram;
     }
@@ -66,7 +67,7 @@ pub fn prep_channel(
     }
     if matches!(
         tf.as_str(),
-        "tsx" | "jsx" | "ts" | "js" | "react" | "react-page" | "component"
+        "tsx" | "jsx" | "ts" | "js" | "mjs" | "react" | "react-page" | "component"
     ) {
         return PrepChannel::Code;
     }
@@ -93,6 +94,12 @@ pub fn prep_channel(
         AssetType::Html | AssetType::StyleGuide => PrepChannel::Html,
         AssetType::Component | AssetType::ReactPage => PrepChannel::Code,
         AssetType::Document => PrepChannel::Document,
+        // cli-tool-mockup emits a self-contained HTML page (screens doc embedded).
+        AssetType::CliToolMockup => PrepChannel::Html,
+        // js-shell emits an ES module of SemTextShell CommandSpecs.
+        AssetType::JsShell => PrepChannel::Code,
+        // text-video emits a vhs .tape script — an ordered terminal-session DSL.
+        AssetType::TextVideo => PrepChannel::Diagram,
         AssetType::Unknown => PrepChannel::Generic,
     }
 }
@@ -828,6 +835,52 @@ pub fn provider_prompt_guidance(
              - Only clean formatting (remove bullets, headers)\n\
              - Voice style direction belongs in provider_options, not the prompt"
         }
+        (_, AssetType::CliToolMockup) => {
+            "PROVIDER NOTES (CLI tool mockup):\n\
+             - Output is ONE self-contained HTML page that loads the noizu-cli-mockup web\n\
+             component from https://cdn.derobot.is/tobor-kit/latest/components/cli-mockup/noizu-cli-mockup.js\n\
+             - The screens doc ships verbatim inside <noizu-cli-mockup> as a\n\
+             <script type=\"text/plain\"> child — no reformatting, no markdown fences\n\
+             - Screens doc grammar (the artifact serves exactly this syntax):\n\
+             \n\
+             @screen <id> [\"<title>\"]\n\
+             <verbatim unicode/text lines>\n\
+             [[<label> -> #<target-id>]]                    # click → goto screen <target-id>\n\
+             [[<label> -> run:<command>]]                   # click → js-shell action\n\
+             [[<label> -> #<target-id>|run:<command>]]      # compound: action then goto\n\
+             \n\
+             ids: integer or [A-Za-z0-9_-]+, unique; first screen is the start; `]]` may not\n\
+             appear in labels; literal `[[` escaped `\\[[`.\n\
+             - Keep unicode box-drawing and terminal text lines byte-exact from the brief\n\
+             - Preserve screen order — the first @screen is the start screen"
+        }
+        (_, AssetType::JsShell) => {
+            "PROVIDER NOTES (JS shell pack — SemTextShell plugin):\n\
+             - Emit ONE ES module (.mjs) whose default export is an array of CommandSpec\n\
+             objects — one per command the pack provides\n\
+             - Each command declares { name, usage, run(ctx) }: name matches\n\
+             /^[a-z][a-z0-9-]*$/ and is unique across the terminal; usage is the help line\n\
+             (e.g. \"greet [-n] <who>\"); run(ctx) receives ctx.args (argv after the command\n\
+             name), ctx.stdin (piped text or null), and writes via ctx.out(text) / ctx.err(text)\n\
+             - Report errors through ctx.err plus ctx.exit(code) — never throw out of run\n\
+             - NO side effects at import time: no fetch, no DOM, no timers, no top-level\n\
+             state mutation — all work happens inside run()\n\
+             - Optional: mount demo documents via a files array ({ path, content }) under\n\
+             your own absolute prefix (/my-plugin/...); absolute https loading elsewhere in\n\
+             SemTextShell requires a sha256 integrity hash, so keep packs plain modules"
+        }
+        (_, AssetType::TextVideo) => {
+            "PROVIDER NOTES (VHS tape — charmbracelet vhs):\n\
+             - Emit a .tape script only — the vhs binary renders it to GIF; no HTML/JS\n\
+             - Start with Output \"demo.gif\" (with optional embed/resize variants), then\n\
+             Require for any external assets the demo needs\n\
+             - Style with the Settings/Typeset block: Theme, FontFamily, FontSize, Padding,\n\
+             Width, Height; tune pacing with Set TypingSpeed / Set Shell\n\
+             - Drive the session with Type \"…\", Enter, Sleep, and key presses (Ctrl+C, Tab,\n\
+             Alt+…) — one command per step, short Sleeps between steps so the GIF reads as\n\
+             a natural terminal demo\n\
+             - Set Width/Height explicitly for a crisp, shareable GIF"
+        }
         _ => match channel {
             PrepChannel::Svg => {
                 "PROVIDER NOTES (SVG via chat):\n\
@@ -1022,6 +1075,32 @@ mod tests {
     }
 
     #[test]
+    fn channel_new_chat_types() {
+        assert_eq!(
+            prep_channel(AssetType::CliToolMockup, AudioKind::Voice, None, "groq-chat"),
+            PrepChannel::Html
+        );
+        assert_eq!(
+            prep_channel(AssetType::JsShell, AudioKind::Voice, None, "groq-chat"),
+            PrepChannel::Code
+        );
+        // text_format overrides still apply on top of the type default.
+        assert_eq!(
+            prep_channel(AssetType::JsShell, AudioKind::Voice, Some("mjs"), "groq-chat"),
+            PrepChannel::Code
+        );
+        assert_eq!(
+            prep_channel(
+                AssetType::TextVideo,
+                AudioKind::Voice,
+                Some("tape"),
+                "groq-chat"
+            ),
+            PrepChannel::Diagram
+        );
+    }
+
+    #[test]
     fn voice_disallows_llm_prep() {
         assert!(!allows_llm_prep(PrepChannel::Voice));
         assert!(allows_llm_prep(PrepChannel::RasterImage));
@@ -1073,5 +1152,37 @@ mod tests {
         assert!(svg.to_lowercase().contains("svg"));
         let imagen = provider_prompt_guidance("gemini", AssetType::Image, None);
         assert!(imagen.contains("Imagen") || imagen.contains("hex codes"));
+    }
+
+    #[test]
+    fn static_guidance_cli_tool_mockup_carries_screens_grammar() {
+        let g = provider_prompt_guidance("groq-chat", AssetType::CliToolMockup, None);
+        assert!(g.contains("noizu-cli-mockup"));
+        assert!(g.contains("cdn.derobot.is"));
+        assert!(g.contains("@screen"));
+        // Canonical grammar lines must survive verbatim (alignment included).
+        assert!(g.contains("[[<label> -> #<target-id>]]"));
+        assert!(g.contains("[[<label> -> run:<command>]]"));
+        assert!(g.contains("[[<label> -> #<target-id>|run:<command>]]"));
+        assert!(g.contains(r"\[["));
+        assert!(g.contains("text/plain"));
+    }
+
+    #[test]
+    fn static_guidance_js_shell_contract() {
+        let g = provider_prompt_guidance("groq-chat", AssetType::JsShell, None);
+        assert!(g.contains("CommandSpec"));
+        assert!(g.contains("import time"));
+        assert!(g.contains("ctx.out"));
+    }
+
+    #[test]
+    fn static_guidance_text_video_tape_directives() {
+        let g = provider_prompt_guidance("groq-chat", AssetType::TextVideo, None);
+        assert!(g.contains("Output"));
+        assert!(g.contains("Settings") && g.contains("Typeset"));
+        assert!(g.contains("Type"));
+        assert!(g.contains("Require"));
+        assert!(g.to_lowercase().contains("vhs"));
     }
 }

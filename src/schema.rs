@@ -324,6 +324,13 @@ pub enum AssetType {
     StyleGuide,
     Diagram,
     Document,
+    /// Chat-generated interactive terminal mockup served as a self-contained
+    /// HTML page embedding the `noizu-cli-mockup` web component.
+    CliToolMockup,
+    /// Chat-generated SemTextShell-compatible JavaScript shell-extension pack.
+    JsShell,
+    /// charmbracelet VHS `.tape` script (CLI "movie script" → GIF).
+    TextVideo,
     Unknown,
 }
 
@@ -353,6 +360,9 @@ impl AssetType {
             "style-guide" => (AssetType::StyleGuide, AudioKind::Voice),
             "diagram" => (AssetType::Diagram, AudioKind::Voice),
             "document" => (AssetType::Document, AudioKind::Voice),
+            "cli-tool-mockup" => (AssetType::CliToolMockup, AudioKind::Voice),
+            "js-shell" => (AssetType::JsShell, AudioKind::Voice),
+            "text-video" => (AssetType::TextVideo, AudioKind::Voice),
             _ => (AssetType::Unknown, AudioKind::Voice),
         }
     }
@@ -369,6 +379,9 @@ impl AssetType {
             AssetType::StyleGuide => "html",
             AssetType::Diagram => "mmd",
             AssetType::Document => "md",
+            AssetType::CliToolMockup => "html",
+            AssetType::JsShell => "mjs",
+            AssetType::TextVideo => "tape",
             AssetType::Unknown => "bin",
         }
     }
@@ -385,6 +398,9 @@ impl AssetType {
                 | AssetType::StyleGuide
                 | AssetType::Diagram
                 | AssetType::Document
+                | AssetType::CliToolMockup
+                | AssetType::JsShell
+                | AssetType::TextVideo
                 | AssetType::Unknown
         )
     }
@@ -551,5 +567,37 @@ fn detect_asset_info(
                 description: None,
             }],
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_chat_types_parse_route_and_default_extensions() {
+        let cases = [
+            ("cli-tool-mockup", AssetType::CliToolMockup, "html"),
+            ("js-shell", AssetType::JsShell, "mjs"),
+            ("text-video", AssetType::TextVideo, "tape"),
+        ];
+        for (type_str, expected, ext) in cases {
+            let (asset, audio) = AssetType::from_type_str(type_str);
+            assert_eq!(asset, expected, "type string '{type_str}'");
+            assert_eq!(audio, AudioKind::Voice);
+            assert_eq!(asset.default_extension(), ext, "'{type_str}' extension");
+            assert!(asset.is_chat_type(), "'{type_str}' must be a chat type");
+            assert_ne!(asset, AssetType::Unknown);
+        }
+    }
+
+    #[test]
+    fn existing_types_still_parse() {
+        assert_eq!(AssetType::from_type_str("document").0, AssetType::Document);
+        assert_eq!(AssetType::from_type_str("image").0, AssetType::Image);
+        assert_eq!(
+            AssetType::from_type_str("no-such-type").0,
+            AssetType::Unknown
+        );
     }
 }

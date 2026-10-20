@@ -19,6 +19,17 @@ are tagged on the original standalone-repo lineage preserved by the subtree squa
 ### Added
 - `provider_options.base_url` overrides the gemini API root, which is how the new
   stubbed-provider test drives the real provider. (2026-09-21)
+- Three chat-generated asset types join the registry: `cli-tool-mockup`
+  (self-contained HTML embedding the noizu-cli-mockup web component with the
+  screens doc inline in a `<script type="text/plain">` child), `js-shell`
+  (SemTextShell-compatible ES-module command packs), and `text-video`
+  (charmbracelet vhs `.tape` scripts) — each with type-string parsing, default
+  extension, chat-provider ladder routing, prep-channel mapping, and static
+  provider guidance (the mockup guidance carries the canonical screens-doc
+  grammar verbatim). FIM solution docs ship for the tape and js-shell channels;
+  a new soft-dependency `vhs` renderer (src/renderers/vhs.rs) turns `.tape`
+  into GIF when the binary is on PATH and skips with install guidance when
+  not; the test lab advertises all three kinds and the renderer. (2026-10-21)
 
 ### Fixed
 - The tool no longer panics while truncating text for display. Every preview of a string the
