@@ -258,6 +258,9 @@ pub fn candidates_for(
         | AssetType::StyleGuide
         | AssetType::Diagram
         | AssetType::Document
+        | AssetType::CliToolMockup
+        | AssetType::JsShell
+        | AssetType::TextVideo
         | AssetType::Unknown => chat_candidates(quality),
     }
 }
@@ -530,6 +533,25 @@ mod tests {
         let med = candidates_for(AssetType::Video, AudioKind::Voice, Quality::Medium);
         assert!(med.len() >= 2);
         assert_eq!(med[0].service, "veo");
+    }
+
+    #[test]
+    fn new_chat_types_ride_chat_ladder() {
+        for asset in [
+            AssetType::CliToolMockup,
+            AssetType::JsShell,
+            AssetType::TextVideo,
+        ] {
+            let cands = candidates_for(asset, AudioKind::Voice, Quality::Medium);
+            assert!(!cands.is_empty(), "{asset:?} must have candidates");
+            for c in &cands {
+                assert_eq!(
+                    c.service, "groq-chat",
+                    "{asset:?} must route to the chat ladder, got {}",
+                    c.service
+                );
+            }
+        }
     }
 
     #[test]

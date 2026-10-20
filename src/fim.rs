@@ -93,6 +93,9 @@ fn text_format_solution(dir: &Path, text_format: &str) -> Option<PathBuf> {
         // Markup / page formats used by demos and skill templates
         "html" | "htm" => &["html.md"],
         "md" | "markdown" | "document" => &["markdown.md"],
+        // media-tool-native channels: charmbracelet vhs tapes + SemTextShell packs
+        "tape" | "vhs" => &["tape.md"],
+        "js-shell" | "mjs" => &["js-shell.md"],
         // No dedicated pure-SVG solution yet; svg_js is the closest vector guidance.
         "svg" => &["svg_js.md"],
         // React / TS component formats — no dedicated solution; leave unmapped
@@ -358,6 +361,8 @@ mod tests {
             ("html", true),
             ("md", true),
             ("svg", true), // maps to svg_js.md
+            ("tape", true),        // media-tool-native: vhs tape script
+            ("js-shell", true),    // media-tool-native: SemTextShell pack
             ("react-page", false), // intentionally unmapped
             ("totally-not-a-format-xyz", false),
         ];
