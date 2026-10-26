@@ -120,7 +120,7 @@ are tagged on the original standalone-repo lineage preserved by the subtree squa
 - Added `docs/PROJ-FAQ.md` + summary (motivation/fit/comparison/capability/caveats/trust Q&A) (2026-07-17)
 - Added `docs/PROJ-HOWTO.md` + summary and `docs/howto/` (first-hour, FIM rich-format usage, common-error troubleshooting) (2026-07-17)
 - Added `docs/PROJ-ARCH.md` + summary; refreshed `docs/PROJ-LAYOUT.md` and `docs/layout/src.md` (2026-07-16)
-- Doc sweep 2026-10-26: `PROJ-LAYOUT`, `PROJ-ARCH`, `PROJ-SCHEMA` and `THREAT-MODEL` (+ summaries) re-verified against source — recorded the `preferences:`/`snippets:` cascade, the `vhs` renderer (5 renderers), the three chat asset types, the Gemini 3 image policy, `tests/` and `DECISIONLOG.md` (2026-10-26)
+- Doc sweep 2026-10-26: `PROJ-LAYOUT`, `PROJ-ARCH`, `PROJ-SCHEMA` and `THREAT-MODEL` (+ summaries) re-verified against source — recorded the `preferences:`/`snippets:` cascade, the `vhs` renderer (5 renderers), the three chat asset types, the Gemini 3 image policy, `tests/` and `DECISIONLOG.md` (2026-10-26); `.meta/pointers.yaml` seeded with ten file anchors (#43)
 
 ## [m6-fim-solution-library] — 2026-07-09 — tag: `utilities-agent-media-tool/m6-fim-solution-library`
 Milestone summary: built out the FIM ("fill-in-the-middle") solution library — a
