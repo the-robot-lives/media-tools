@@ -1,3 +1,4 @@
+// 〚📁:502629f1-a7eb-5711-989f-a0ab633220b4〛 media-tool library surface :: Engine shared by the CLI, test lab and macOS front-ends; publishes telemetry, never prints.
 //! media-tool library surface.
 //!
 //! Everything the `generate-media-prompt` CLI does is implemented here so that other

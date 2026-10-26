@@ -1,3 +1,4 @@
+# 〚📁:9a06a60b-f071-591f-aee7-f06476be8f62〛 media-tool runtime config :: defaults, tier ladders, limits, snippets and the preference cascade.
 # media-tool runtime provider/model configuration
 #
 # Loaded at startup (first match wins, all optional — absent keys fall back to

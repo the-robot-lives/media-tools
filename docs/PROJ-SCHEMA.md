@@ -1,4 +1,5 @@
 # Project Schema Reference
+〚📁:e97fd4bd-e9d4-51e2-9383-2150c2d8da77〛 media-tool schema reference :: Data formats — .media.prompt YAML, runtime config cascade, lab workspace, env vars (no persistence layer).
 
 ## Persistence Layer
 

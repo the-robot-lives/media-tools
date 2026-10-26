@@ -1,3 +1,4 @@
+// 〚📁:4b600fdf-99c0-5ed5-bb42-8ff1211ae438〛 media-tool CLI entry :: clap shell — input resolution, subcommand dispatch, terminal rendering, exit codes.
 //! CLI shell for the media-tool library.
 //!
 //! This binary owns only CLI concerns: clap parsing, terminal rendering (dialoguer prompts,
