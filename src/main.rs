@@ -191,6 +191,8 @@ async fn main() -> color_eyre::Result<()> {
             };
             return orchestrator::explain_prompt(&prompt, &config);
         }
+        // Offline command, handled above before env/provider init.
+        Some(Commands::Models) => unreachable!("`models` is handled before provider init"),
         None => {}
     }
 
