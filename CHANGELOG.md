@@ -30,6 +30,8 @@ are tagged on the original standalone-repo lineage preserved by the subtree squa
   a new soft-dependency `vhs` renderer (src/renderers/vhs.rs) turns `.tape`
   into GIF when the binary is on PATH and skips with install guidance when
   not; the test lab advertises all three kinds and the renderer. (2026-10-21)
+- `media-tool models` subcommand: prints the documented Gemini image models and the
+  minimum-version policy offline, no API key or provider init required. (#20) (2026-10-26)
 
 ### Fixed
 - The tool no longer panics while truncating text for display. Every preview of a string the

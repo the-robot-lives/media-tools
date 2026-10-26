@@ -115,6 +115,8 @@ enum Commands {
         #[arg(long, value_name = "ID")]
         model: Option<String>,
     },
+    /// List documented Gemini image models and the minimum-version policy (offline)
+    Models,
     /// Interactive web lab: browse types, generate, view, and eval media
     Lab {
         /// Listen port (default 8787)
@@ -151,6 +153,11 @@ async fn main() -> color_eyre::Result<()> {
     install_terminal_subscriber();
     let cli = Cli::parse();
 
+    if matches!(cli.command, Some(Commands::Models)) {
+        println!("{}", media_tool::providers::gemini::IMAGE_MODELS);
+        return Ok(());
+    }
+
     // Load .envrc.k8.dc for API keys (GEMINI, SUNO, OPENAI, ELEVENLABS, DASHSCOPE)
     orchestrator::load_envrc();
 
@@ -184,6 +191,8 @@ async fn main() -> color_eyre::Result<()> {
             };
             return orchestrator::explain_prompt(&prompt, &config);
         }
+        // Offline command, handled above before env/provider init.
+        Some(Commands::Models) => unreachable!("`models` is handled before provider init"),
         None => {}
     }
 
