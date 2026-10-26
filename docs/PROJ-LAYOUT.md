@@ -7,9 +7,10 @@ media-tool/
 │   ├── lib.rs                      #   Library surface — all logic reusable by GUI front-ends
 │   ├── schema.rs                   #   .media.prompt YAML parsing and normalization
 │   ├── provider_config.rs          #   Runtime provider config loader (media-tool.yaml)
+│   ├── preferences.rs              #   CSS-style preference cascade + house-style snippets
 │   ├── test_lab/                   #   Local eval/test-lab web server → [layout/src.md](layout/src.md)
 │   ├── providers/                  #   16 provider implementations → [layout/src.md](layout/src.md)
-│   └── renderers/                  #   4 markup → visual renderers → [layout/src.md](layout/src.md)
+│   └── renderers/                  #   5 markup → visual renderers → [layout/src.md](layout/src.md)
 ├── bin/                            # Shell entry points
 │   ├── generate-media-prompt       #   Bash wrapper (k8-lib, Python engine dispatch)
 │   └── media-eval-port-forward     #   kubectl port-forward for in-cluster eval proxy
@@ -56,6 +57,7 @@ media-tool/
 │   ├── PROJ-LAYOUT.summary.md      #   Quick-reference tree
 │   ├── PROJ-ARCH.md / .summary.md  #   Architecture doc
 │   ├── PROJ-SCHEMA.md / .summary.md  # .media.prompt schema reference
+│   ├── THREAT-MODEL.md / .summary.md #  Trust boundaries + vulnerability register
 │   ├── PROJ-FAQ.md / .summary.md   #   FAQ
 │   ├── PROJ-HOWTO.md / .summary.md #   How-to index
 │   ├── howto/                      #   Task guides (first-hour, dependencies, rich formats, troubleshooting)
@@ -65,7 +67,9 @@ media-tool/
 │   ├── quality-selection-and-eval.md  # Quality selection + eval system design
 │   ├── eval-criteria-catalog.md    #   Eval criteria reference
 │   ├── prompt-quality-audit.md     #   Prompt quality audit notes
-│   └── testing.md                  #   Test approach
+│   ├── testing.md                  #   Test approach
+│   └── TEST-HEALTH.md              #   CI/test timing, cache and coverage health snapshot
+├── tests/                          # Rust integration test targets (provider HTTP, policy, telemetry, asset registry)
 ├── .github/workflows/ci.yml        # CI (build, test)
 ├── .gitignore                      # Rust target/, Python caches, lab-workspace/, tmp/
 ├── Cargo.toml                      # Rust package definition (bin + deps)
@@ -76,6 +80,7 @@ media-tool/
 ├── CLAUDE.md                       # Claude Code agent guidance (commands, monorepo rules)
 ├── AGENT.md / AGENTS.md            # Multi-agent (Grok Build) guidance, kept aligned with CLAUDE.md
 ├── CHANGELOG.md                    # Release changelog
+├── DECISIONLOG.md                  # Architectural decisions + their reversal triggers
 ├── LICENSE                         # License file
 └── README.md                       # Full user documentation (schema, CLI, providers)
 ```

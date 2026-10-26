@@ -12,10 +12,11 @@ The primary implementation is a Rust **library + CLI** (`lib.rs` surface, `gener
 graph TB
     A[".media.prompt files"] --> B["schema.rs<br/>parse + normalize v0.1–v0.4"]
     B --> C["dag.rs<br/>Kahn's topo sort → tiers"]
-    M["media-tool.yaml<br/>runtime provider/model overrides"] -.-> D
+    M["media-tool.yaml<br/>runtime provider/model overrides<br/>+ preference cascade"] -.-> D
     C --> D["pipeline.rs<br/>orchestration"]
+    P["preferences.rs<br/>selector → field patches + provenance"] -.-> D
     D --> E["providers/*<br/>16 APIs: image, chat, TTS, music, SFX, video"]
-    D --> F["renderers/*<br/>mermaid, plantuml, graphviz, puppeteer"]
+    D --> F["renderers/*<br/>5: mermaid, plantuml, graphviz, puppeteer, vhs"]
     E --> G["output.rs<br/>naming, formats, variants"]
     F --> G
     G --> PP["postprocess.rs / imagefmt.rs<br/>crop, resize, magic-number format reconcile"]
@@ -35,11 +36,12 @@ graph TB
 | `src/main.rs` | CLI entry (clap): input resolution, flag handling, pipeline dispatch |
 | `src/schema.rs` | YAML parsing; normalizes legacy v0.1–v0.3 schemas to v0.4 |
 | `src/provider_config.rs` | Loads `media-tool.yaml` (file or URL) — runtime overrides for defaults, tiers, limits |
+| `src/preferences.rs` | CSS-style preference cascade: config selector rules (`*`, `type:`, `tag:`, `id:`) patch `service`/`model`/`quality` field-by-field, returning full provenance for `explain` and the GUI |
 | `src/structural.rs` | Structural format detection/normalization for markup assets |
 | `src/dag.rs` | Dependency graph across prompt files; cycle detection, Kahn's algorithm, tier grouping |
 | `src/pipeline.rs` | Orchestration: dry-run preview, execution, quality→provider selection, tier ordering |
 | `src/providers/` | 16 `MediaProvider` implementations: Gemini/Imagen, Qwen/DashScope, ZAI, Suno, three TTS engines, six chat providers, Grok/Veo/Wan video |
-| `src/renderers/` | Markup→visual transforms: Mermaid, PlantUML, Graphviz, Puppeteer screenshots |
+| `src/renderers/` | Markup→visual transforms: Mermaid, PlantUML, Graphviz, Puppeteer screenshots, VHS `.tape`→GIF |
 | `src/postprocess.rs` + `src/imagefmt.rs` | `post_processing:` steps (crop, resize); image magic-number detection and format reconciliation |
 | `src/telemetry.rs` + `src/term_layer.rs` | Library publishes progress as tracing events; CLI subscriber renders them to the terminal |
 | `src/test_lab/` | Local HTTP server + browser UI for interactive prompt lab (catalog, settings, persistence) |
@@ -65,9 +67,9 @@ Three provider categories, dispatched from a registry in `providers/mod.rs`:
 
 1. **Media providers** (binary output): Gemini Imagen, Qwen image, DashScope, ZAI (image); Suno (music + SFX, async polling); OpenAI TTS, ElevenLabs, Qwen TTS (voice); Grok Video, Veo, Wan (video, async polling).
 2. **Chat-completion providers** (text/code output): Gemini chat, Anthropic, OpenAI chat, Groq, OpenRouter, LiteLLM/ZAI — for React pages, HTML, SVG, diagrams, style guides.
-3. **Renderers** (markup → visual, post-generation transforms): mmdc, plantuml, dot, Puppeteer screenshot.
+3. **Renderers** (markup → visual, post-generation transforms): mmdc, plantuml, dot, Puppeteer screenshot, charmbracelet VHS (`.tape` → GIF, soft dependency — skipped with install guidance when the binary is absent).
 
-All provider model defaults, quality-tier ladders, and prompt-length limits can be overridden at runtime via `media-tool.yaml` (local or remote URL) without rebuilding — see `src/provider_config.rs`.
+All provider model defaults, quality-tier ladders, and prompt-length limits can be overridden at runtime via `media-tool.yaml` (local or remote URL) without rebuilding — see `src/provider_config.rs`. Image generation additionally enforces a **Gemini 3 minimum**: 2.x models and unversioned aliases are rejected before prompt prep, eval, or any API call (`generate-media-prompt models` prints the catalog and policy offline); Gemini chat models are unaffected.
 
 Adding a provider = implement the `MediaProvider` trait + register in `mod.rs`.
 
@@ -76,6 +78,12 @@ Adding a provider = implement the `MediaProvider` trait + register in `mod.rs`.
 ## Generation Flow
 
 Prompts are parsed and normalized, `depends_on` references are resolved into a DAG (cycles abort), and assets generate tier by tier — dependency outputs substitute into dependent prompts via `${alias}` (collapse modes: `file`, `inline`, `context`). Each generation passes through output naming/format handling, then optional eval grading.
+
+## Prompt Model & Preference Cascade
+
+Authors declare intent in the prompt file (`type`, `quality`, prompt text, eval criteria); provider plumbing is filled in by `src/preferences.rs`, a CSS-style cascade whose selector rules (`*` < `type:<t>` < `type:<t>[attr=v]`/`tag:` < `id:` < prompt-file field < CLI flag) **patch** the resolved `service`/`model`/`quality` field-by-field rather than replacing them. Ties at equal specificity go to the later rule, as in CSS. The resolver is pure (no filesystem or env reads) and always returns provenance, so `generate-media-prompt explain <prompt-file>` and the GUI's "why this provider?" affordance read the same structure generation actually used. `snippets:` (from config or the prompt file) compose house-style text into `prompt.system`. Asset types cover media (`image`, `audio`/`voice`/`music`/`sfx`, `video`) plus chat-generated `component`, `react-page`, `html`, `style-guide`, `diagram`, `document`, `cli-tool-mockup`, `js-shell`, and `text-video` (VHS tapes).
+
+→ *See [PROJ-SCHEMA.md](PROJ-SCHEMA.md) for the config and prompt file shapes*
 
 ## Quality Selection & Eval
 
@@ -104,11 +112,13 @@ Authors declare `quality: low|medium|high` instead of pinning providers; the too
 
 - **Rust rewrite over Python engine**: single static binary, TUI (`-r` interactive selection, zellij `-j` batch panes), async provider polling; Python engine retained only as no-cargo fallback.
 - **Declarative YAML + quality tiers**: prompt files carry intent and acceptance criteria, not provider plumbing — `service:` pinning is the escape hatch, not the default.
+- **Preference cascade over per-prompt pinning**: provider/model/quality resolve through a CSS-like selector cascade with provenance, so fleet-wide defaults live in one config file and any run can be explained rather than guessed.
 - **Runtime config over recompilation**: model defaults/tiers/limits live behind `media-tool.yaml` so fleet behavior can change via a URL-served file, no rebuild.
+- **Gemini 3 minimum for image generation**: model ids are gated on the image path only, before any API call, because stale 2.x ids silently degrade output; the 3.x family is allowed wholesale since Gemini image ids do not order by version string.
 - **DAG-first batch model**: cross-file dependencies are first-class (`depends_on` + collapse modes), enabling multi-asset compositions (logo → hero → animation).
 - **Eval-gated generation**: LLM grading with provider fallback trades API cost for hands-off quality; degrades gracefully (skip eval) when no evaluator endpoint is reachable.
 - **Library-first split**: core logic lives in `lib.rs` behind `orchestrator.rs`, and library code publishes progress via `telemetry.rs` tracing events instead of writing to the terminal — so the CLI (`term_layer.rs`), test lab, and macOS app are all front-ends over one engine.
-- **Renderers as post-transforms, not providers**: chat models emit markup; local CLI tools (mmdc, plantuml, dot, Puppeteer) turn it into visuals — cleanly separating generation from rendering.
+- **Renderers as post-transforms, not providers**: chat models emit markup; local CLI tools (mmdc, plantuml, dot, Puppeteer, vhs) turn it into visuals — cleanly separating generation from rendering. Soft dependencies skip with install guidance instead of failing the run.
 - **Honest post-processing failure**: unknown `post_processing:` actions fail the run (non-zero exit) rather than silently reporting success; `--allow-unimplemented-post` downgrades to a warning.
 
 ## Known Gaps

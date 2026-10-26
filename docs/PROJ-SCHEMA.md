@@ -30,7 +30,7 @@ This document is the single source of truth for all of those data formats.
 |-------|------|----------|---------|-------------|
 | `schema` | string | No | `"0.1"` | Schema version (`0.1`–`0.4`) |
 | `id` | string | No | filename stem | Stable identifier for DAG references |
-| `type` | string | No | `"image"` | Asset type: `image`, `audio`, `voice`, `music`, `sfx`, `video`, `component`, `react-page`, `html`, `style-guide`, `diagram`, `document` |
+| `type` | string | No | `"image"` | Asset type: `image`, `audio`, `voice`, `music`, `sfx`, `video`, `component`, `react-page`, `html`, `style-guide`, `diagram`, `document`, `cli-tool-mockup`, `js-shell`, `text-video` |
 | `service` | string | No | auto-select | Pin a provider (e.g. `gemini`, `suno`, `veo`) |
 | `model` | string | No | service default | Pin a model id |
 | `quality` | string | No | `"medium"` | Tier: `low` / `medium` / `high` (v0.4; picks image_tiers ladder) |
@@ -41,7 +41,8 @@ This document is the single source of truth for all of those data formats.
 | `depends_on` | list | No | `[]` | DAG dependencies (below) |
 | `post_processing` | list | No | `[]` | Post-gen steps: `{action, params}` — see [Post-processing steps](#post-processing-steps) |
 | `eval` | map | No | — | Eval section (below) |
-| `tags` | list | No | `[]` | Free-form tags |
+| `tags` | list | No | `[]` | Free-form tags (also matched by `tag:` preference selectors) |
+| `snippets` | list | No | `[]` | Names of house-style snippets (from config `snippets:`) composed in order into `prompt.system`; overrides any `snippets:` a `preferences:` rule supplied |
 | `product_targets` | list | No | `[]` | Product routing hints |
 
 ### Post-processing steps
@@ -53,7 +54,7 @@ order, rewriting the file in place.
 |--------|--------|-------|
 | `crop` | `aspect_ratio` (`"1.91:1"`, `"16:9"`, `"4:3"`, `"1:1"`), `gravity` (`center`\|`top`\|`bottom`\|`left`\|`right`, default `center`), or explicit `width`/`height` | Largest box of the target aspect that fits the source, anchored by gravity. An explicit `width`+`height` box wins over `aspect_ratio`. |
 | `resize` | `width`, `height`, `fit` (`cover`\|`contain`\|`fill`, default `cover`) | `cover` crops to the target aspect (gravity-anchored) then scales to exactly `width`x`height`; `contain` scales to fit inside the box preserving aspect (no padding); `fill` stretches. A single axis preserves aspect. |
-| `render` | `tool` (`mermaid`\|`plantuml`\|`graphviz`\|`puppeteer`), `output_format` | Renders a structural/text output to an image. |
+| `render` | `tool` (`mermaid`\|`plantuml`\|`graphviz`\|`puppeteer`\|`vhs`), `output_format` | Renders a structural/text output to an image. `vhs` turns a `.tape` script into GIF (or the tape's `Output` format) and is a soft dependency — with no `vhs` binary on PATH it skips with install guidance. |
 
 Formats: PNG, JPEG, WebP and GIF; the original extension and encoder are preserved.
 
@@ -151,6 +152,23 @@ Untagged union:
 | `max_prompt_chars` | map | service → max prompt character limit |
 | `refine_model` | string | Chat model for the refine loop |
 | `prompt_guidance` | map | service → prompt-guidance doc path (relative to solutions dir) |
+| `snippets` | map | name → text block; referenced by `snippets:` on a `preferences:` rule or prompt file, composed in declared order and prepended to `prompt.system` |
+| `preferences` | map (ordered) | CSS-style selector → overrides cascade (§2.1). YAML *mapping order is load-bearing* |
+
+### 2.1 `preferences:` — CSS-style cascade
+
+Each key is a selector; its value is a set of overrides (`service`, `model`, `quality`, `snippets`) that **patch** the resolved settings field-by-field rather than replacing them. Precedence, weakest to strongest:
+
+| rank | layer | example |
+|------|-------|---------|
+| 0 | `"*"` universal | `"*": {service: openai}` |
+| 1 | `type:<t>` | `"type:image"` |
+| 2 | `type:<t>[attr=v]` and `tag:<tag>` | `"type:image[quality=high]"` |
+| 3 | `id:<id>` | `"id:hero-shot"` |
+| 4 | explicit field in the `.media.prompt` | `service: grok` |
+| 5 | CLI flag / GUI override for this run | `--service grok` |
+
+Ties at equal specificity go to the **later** rule, as in CSS. Attribute selectors match the **pre-cascade** prompt (a `quality` the cascade itself produced does not feed back into matching), so resolution is a single pass with no fixpoint. Supported attributes: `quality`, `format`, `service`, `model`, `text_format`, `tag`, `id`. A rule-supplied `service` behaves like an inline `service:` field — it pins the provider and skips the quality ladder. `generate-media-prompt explain <prompt-file>` prints which rule won each field.
 
 ---
 
@@ -248,6 +266,10 @@ Slug inference from path: `prompts/fim/<generator>/x.media.prompt` →
 ```mermaid
 erDiagram
     MEDIA_TOOL_YAML ||--o{ PROVIDER : "tunes defaults/tiers"
+    MEDIA_TOOL_YAML ||--o{ PREFERENCE_RULE : "declares (ordered)"
+    PREFERENCE_RULE ||--o{ SNIPPET : "references"
+    PREFERENCE_RULE ||--o{ MEDIA_PROMPT : "patches service/model/quality"
+    SNIPPET ||--o{ MEDIA_PROMPT : "composes into prompt.system"
     PROVIDER ||--o{ MEDIA_PROMPT : "generates output for"
     MEDIA_PROMPT ||--o{ OUTPUT_FILE : "declares formats"
     MEDIA_PROMPT ||--o{ ATTACHMENT : "references"
@@ -267,6 +289,8 @@ package "Config" {
   MEDIA_TOOL_YAML : max_prompt_chars / refine_model
   SETTINGS_JSON : llm.provider / model
   SETTINGS_JSON : llm.base_url / api_key
+  PREFERENCE_RULE : selector / overrides
+  SNIPPET : name -> text
 }
 
 package "Prompt Definitions" {
@@ -283,6 +307,8 @@ package "Generated" {
 }
 
 MEDIA_TOOL_YAML ..> MEDIA_PROMPT : tier/limit resolution
+PREFERENCE_RULE ..> MEDIA_PROMPT : service/model/quality patch
+SNIPPET ..> MEDIA_PROMPT : prompt.system composition
 MEDIA_PROMPT *-- "0..*" ATTACHMENT
 MEDIA_PROMPT *-- "0..*" OUTPUT_FILE
 MEDIA_PROMPT o-- MEDIA_PROMPT : depends_on

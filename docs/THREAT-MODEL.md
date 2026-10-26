@@ -33,6 +33,7 @@ graph LR
     subgraph Render["Local render subprocesses"]
         CLI --> MM[mmdc / plantuml / dot] 
         CLI --> PU[Puppeteer headless Chrome<br/>file:// + network]
+        CLI --> VH[vhs / ttyd / ffmpeg<br/>fixed-name subprocess]
     end
     WEB[Public internet] -->|HTTPS| SITE[landing site: static content only]
 ```
@@ -42,7 +43,7 @@ graph LR
 1. **Internet → operator machine**: remote config fetch (`http://` allowed), provider/eval egress, and the deployed static site. Keys cross this boundary on every provider call.
 2. **Prompt file → engine**: a `.media.prompt` from a cloned repo or LLM output is parsed and *acted on* — filenames, attachment paths, `layout:` binary names, rendered markup.
 3. **Browser → loopback server**: the test lab has no authentication; any local webpage can attempt requests against `127.0.0.1:<port>`.
-4. **Engine → local subprocesses**: renderers and post-processing execute local tooling over LLM-generated content.
+4. **Engine → local subprocesses**: renderers and post-processing execute local tooling over LLM-generated content. In all renderers except Graphviz the executable is a fixed name (`mmdc`, `plantuml`, `node`, `vhs`); only Graphviz lets the prompt choose it (T-002).
 
 ## Vulnerability Register
 
@@ -66,7 +67,7 @@ graph LR
 Mitigation ↔ vulnerability map:
 
 - Loopback-only bind (`server.rs` binds `127.0.0.1`) → narrows T-004 but does not close it (no auth)
-- No-shell `Command::new` with fixed args in all renderers → contains T-002 to binary *name* choice only
+- No-shell `Command::new` with fixed args in all renderers; every renderer except Graphviz also uses a fixed binary name → contains T-002 to binary *name* choice only
 - Gitignored `lab-workspace/` + `env:NAME` key indirection (`settings.rs`) → T-006
 - Bounded polling/retry/timeout parameters on every async provider → T-009
 - Headless Chrome + screenshot-only output + 30s goto timeout → T-005 (partial)

@@ -8,6 +8,7 @@ src/
 ├── schema.rs               # YAML .media.prompt parsing — schema v0.1–v0.4 normalization
 ├── structural.rs           # Structural format detection/normalization (mermaid, html, etc.)
 ├── provider_config.rs      # Runtime provider config loader — media-tool.yaml / MEDIA_TOOL_CONFIG
+├── preferences.rs          # CSS-style preference cascade (selector → field patches, full provenance) + snippet library
 ├── pipeline.rs             # Generation pipeline — dry-run preview, execution, tier ordering
 ├── dag.rs                  # Dependency DAG — cycle detection, topological sort (Kahn's)
 ├── attachments.rs          # Attachment loading — file reads, MIME detection, base64 encoding
@@ -46,7 +47,8 @@ src/
 │   ├── mermaid.rs           #   Mermaid — mmdc CLI or Puppeteer-based rendering
 │   ├── plantuml.rs          #   PlantUML — server or CLI rendering
 │   ├── graphviz.rs          #   Graphviz DOT — dot CLI rendering
-│   └── puppeteer.rs         #   Puppeteer — headless Chrome screenshot capture
+│   ├── puppeteer.rs         #   Puppeteer — headless Chrome screenshot capture
+│   └── vhs.rs               #   charmbracelet VHS — `.tape` script → GIF (soft dep; skips when binary absent)
 └── test_lab/                # Local eval/test-lab server (browser-based prompt lab)
     ├── mod.rs               #   Module wiring
     ├── server.rs            #   HTTP server serving the lab UI + generation endpoints
@@ -72,6 +74,7 @@ main.rs / term_layer.rs   (CLI front-end: clap, terminal rendering of telemetry)
         │     ├── postprocess.rs (crop/resize post-processing)
         │     └── eval.rs      (quality scoring)
         ├── provider_config.rs (runtime config overrides)
+        ├── preferences.rs     (preference cascade → service/model/quality + provenance)
         ├── attachments.rs     (file loading)
         ├── refine.rs          (interactive loop)
         ├── prep.rs            (prompt expansion)

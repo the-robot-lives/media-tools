@@ -2,7 +2,7 @@
 
 Local developer tool (CLI + loopback test-lab server + macOS app); crown jewels are provider API keys and the operator filesystem. Static landing site has no security surface. Full model: [THREAT-MODEL.md](THREAT-MODEL.md)
 
-**Trust boundaries**: internet→machine (remote config fetch, provider/eval egress) · prompt-file→engine (semi-trusted input drives filenames, attachment paths, renderer binaries, rendered markup) · browser→loopback lab (no auth) · engine→render subprocesses.
+**Trust boundaries**: internet→machine (remote config fetch, provider/eval egress) · prompt-file→engine (semi-trusted input drives filenames, attachment paths, renderer binaries, rendered markup) · browser→loopback lab (no auth) · engine→render subprocesses (fixed binary names except Graphviz's prompt-chosen `layout:`).
 
 **Register (10 entries)**: 2 mitigated · 2 partial · 2 accepted · 4 open.
 
