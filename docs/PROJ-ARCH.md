@@ -1,4 +1,5 @@
 # Project Architecture
+〚📁:555445e7-ad74-5eca-8949-c2f6b5814206〛 media-tool architecture :: Components, provider/renderer layers, preference cascade, data flow and key decisions.
 
 ## Overview
 

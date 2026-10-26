@@ -1,4 +1,5 @@
 # Provider Implementation Guide
+〚📁:73361668-cc0d-5de0-ae46-1796f153cf1a〛 media-tool provider guide :: Provider implementation guide and status tracker.
 
 > Tracking doc for implementing generation providers in `generate-media-prompt`.
 >

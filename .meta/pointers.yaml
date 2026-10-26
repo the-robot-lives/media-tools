@@ -1,0 +1,149 @@
+---
+pointers:
+  3cdb1122-def1-57ed-9a06-ce2ed644fb66:
+    created_at: 2026-10-26T22:06:31.775715Z
+    description: Per-run CLI/GUI override layer for the preference cascade.
+    file_path: src/pipeline.rs
+    function: cli_overrides
+    kind: function
+    line: 700
+    token: 𓅃𓈍𓂘𓋘
+    updated_at: 2026-10-26T22:06:31.775715Z
+  4b600fdf-99c0-5ed5-bb42-8ff1211ae438:
+    created_at: 2026-10-26T22:06:10.500949Z
+    description: clap shell — input resolution, subcommand dispatch, terminal rendering, exit codes.
+    file_path: src/main.rs
+    function: media-tool CLI entry
+    kind: file
+    line: 1
+    locations:
+      - file_path: src/main.rs
+        line: 1
+    token: 𔕠𓔊𓃕𔄘
+    updated_at: 2026-10-26T22:06:10.500949Z
+  502629f1-a7eb-5711-989f-a0ab633220b4:
+    created_at: 2026-10-26T22:06:10.500918Z
+    description: Engine shared by the CLI, test lab and macOS front-ends; publishes telemetry, never prints.
+    file_path: src/lib.rs
+    function: media-tool library surface
+    kind: file
+    line: 1
+    locations:
+      - file_path: src/lib.rs
+        line: 1
+    token: 𓏃𔖡𓨫𔇴
+    updated_at: 2026-10-26T22:06:10.500918Z
+  555445e7-ad74-5eca-8949-c2f6b5814206:
+    created_at: 2026-10-26T22:06:10.500922Z
+    description: Components, provider/renderer layers, preference cascade, data flow and key decisions.
+    file_path: docs/PROJ-ARCH.md
+    function: media-tool architecture
+    kind: file
+    line: 2
+    locations:
+      - file_path: docs/PROJ-ARCH.md
+        line: 2
+    token: 𓕃𓕸𓅤𓡖
+    updated_at: 2026-10-26T22:06:10.500922Z
+  65a25f79-bbe2-5fc7-8c1f-bd58ddafd8d0:
+    created_at: 2026-10-26T22:06:31.775740Z
+    description: resolve the preference cascade for one prompt file
+    file_path: src/orchestrator.rs
+    function: explain
+    kind: function
+    line: 344
+    token: 𓉦𓈬𓅷𓏃
+    updated_at: 2026-10-26T22:06:31.775740Z
+  73361668-cc0d-5de0-ae46-1796f153cf1a:
+    created_at: 2026-10-26T22:06:10.500941Z
+    description: Provider implementation guide and status tracker.
+    file_path: docs/providers.md
+    function: media-tool provider guide
+    kind: file
+    line: 2
+    locations:
+      - file_path: docs/providers.md
+        line: 2
+    token: 𓹹𔎶𔕙𓌊
+    updated_at: 2026-10-26T22:06:10.500941Z
+  7b53bb10-5c5c-5341-aa89-21c1e31fcd30:
+    created_at: 2026-10-26T22:06:10.500945Z
+    description: Trust boundaries, attack surface and the vulnerability register.
+    file_path: docs/THREAT-MODEL.md
+    function: media-tool threat model
+    kind: file
+    line: 2
+    locations:
+      - file_path: docs/THREAT-MODEL.md
+        line: 2
+    token: 𔊨𓃦𓰶𔊠
+    updated_at: 2026-10-26T22:06:10.500945Z
+  7e31c5ab-6936-5407-9dcd-ba7ef5b1c60e:
+    created_at: 2026-10-26T22:06:10.500935Z
+    description: Quick reference for authoring .media.prompt files (quality + eval first).
+    file_path: HOW-TO.md
+    function: media-tool prompt howto
+    kind: file
+    line: 2
+    locations:
+      - file_path: HOW-TO.md
+        line: 2
+    token: 𓞚𔖊𓑿𔆎
+    updated_at: 2026-10-26T22:06:10.500935Z
+  9a06a60b-f071-591f-aee7-f06476be8f62:
+    created_at: 2026-10-26T22:06:10.500913Z
+    description: defaults, tier ladders, limits, snippets and the preference cascade.
+    file_path: media-tool.yaml
+    function: media-tool runtime config
+    kind: file
+    line: 1
+    locations:
+      - file_path: media-tool.yaml
+        line: 1
+    token: 𓎝𔇈𓵟𓫢
+    updated_at: 2026-10-26T22:06:10.500913Z
+  a021eb67-fc06-5495-b470-1b2146d7b076:
+    created_at: 2026-10-26T22:06:31.775730Z
+    description: resolve and print the cascade for one prompt file
+    file_path: src/orchestrator.rs
+    function: explain_prompt
+    kind: function
+    line: 372
+    token: 𓆊𓐁𓀉𓍒
+    updated_at: 2026-10-26T22:06:31.775730Z
+  b0395857-c31c-5990-b364-7b9263836612:
+    created_at: 2026-10-26T22:06:10.500938Z
+    description: Entry point — what/why, getting started, how it works, repo layout.
+    file_path: README.md
+    function: media-tool README
+    kind: file
+    line: 2
+    locations:
+      - file_path: README.md
+        line: 2
+    token: 𓯰𓏜𓱈𓅲
+    updated_at: 2026-10-26T22:06:10.500938Z
+  e97fd4bd-e9d4-51e2-9383-2150c2d8da77:
+    created_at: 2026-10-26T22:06:10.500931Z
+    description: Data formats — .media.prompt YAML, runtime config cascade, lab workspace, env vars (no persistence layer).
+    file_path: docs/PROJ-SCHEMA.md
+    function: media-tool schema reference
+    kind: file
+    line: 2
+    locations:
+      - file_path: docs/PROJ-SCHEMA.md
+        line: 2
+    token: 𓛬𔔃𓥙𓅧
+    updated_at: 2026-10-26T22:06:10.500931Z
+  fd709898-1dbb-5cca-961b-51a797086087:
+    created_at: 2026-10-26T22:06:10.500897Z
+    description: Navigable map of the repository structure.
+    file_path: docs/PROJ-LAYOUT.md
+    function: media-tool repo layout
+    kind: file
+    line: 2
+    locations:
+      - file_path: docs/PROJ-LAYOUT.md
+        line: 2
+    token: 𓇍𓽠𔘣𔙇
+    updated_at: 2026-10-26T22:06:10.500897Z

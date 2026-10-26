@@ -1,4 +1,5 @@
 # Project Layout
+〚📁:fd709898-1dbb-5cca-961b-51a797086087〛 media-tool repo layout :: Navigable map of the repository structure.
 
 ```
 media-tool/
