@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Document review</title>
+<style>html,body{height:100%;margin:0;font:15px system-ui;background:#f6f7f9;color:#16202b}body{display:flex;flex-direction:column}header{padding:14px 20px;display:flex;justify-content:space-between;border-bottom:1px solid #d4dbe4}h1{font:inherit;margin:0}iframe{border:0;flex:1;width:100%;background:#fff}pre{overflow:auto;padding:20px;white-space:pre-wrap}#error{color:#a00}a{color:#205c9d}</style>
+<script src="/review-adapters.js"></script></head><body><header><h1 id="title">Document review</h1><a href="/document" download id="source">Download source</a></header><p id="error" role="alert" hidden></p><iframe id="preview" sandbox="allow-scripts" title="Document preview"></iframe>
+<script type="module">
+try {
+ const meta=await (await fetch('/metadata')).json();document.getElementById('title').textContent=meta.filename;document.title=meta.filename+' — Review';document.getElementById('source').download=meta.filename;
+ const frame=document.getElementById('preview');const url=new URL('/document',location.href).href;
+ if(meta.kind==='music21j'){frame.srcdoc=MediaToolReview.music21jDocument(url);}
+ else if(meta.kind==='musicxml'){const source=await (await fetch(url)).text();frame.srcdoc=MediaToolReview.osmdDocument(source);}
+ else if(meta.kind==='html'){frame.src=url;}
+ else if(['image','audio','video','pdf'].includes(meta.kind)){const tag={image:'img',audio:'audio',video:'video',pdf:'iframe'}[meta.kind];frame.srcdoc='<!doctype html><style>body{margin:20px}img,video,iframe{max-width:100%;width:100%}</style><'+tag+' '+(meta.kind==='audio'||meta.kind==='video'?'controls ':'')+'src="'+url+'"></'+tag+'>';}
+ else{frame.hidden=true;const pre=document.createElement('pre');pre.textContent=await (await fetch(url)).text();document.body.appendChild(pre);}
+} catch(error){const el=document.getElementById('error');el.hidden=false;el.textContent=String(error);}
+</script></body></html>

@@ -116,6 +116,7 @@ pub async fn run_lab(cfg: LabConfig) -> color_eyre::Result<()> {
     let app = Router::new()
         .route("/", get(index_page))
         .route("/view", get(viewer_page))
+        .route("/review-adapters.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], crate::review::ADAPTERS) }))
         .route("/api/health", get(health))
         .route("/api/kinds", get(api_kinds))
         .route("/api/graph", get(api_graph))

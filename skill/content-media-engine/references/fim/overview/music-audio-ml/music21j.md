@@ -4,9 +4,11 @@
 Music21j is the JavaScript port of MIT's music21 Python toolkit for computer-aided musicology, enabling music analysis and visualization in the browser. It produces notation (rendered via its bundled VexFlow) plus theory/analysis results and MIDI playback. Primary consumer is browser JavaScript.
 
 ## How
-- **LLM emits:** Music21j JavaScript that builds musical objects — `new music21.note.Note('C4')`, a `music21.stream.Stream()` container to which notes are appended, or a parsed MusicXML string via `music21.musicxml.parse(...)`.
-- **Render step:** display a stream into the DOM with `s.appendNewDOM(document.getElementById('music-container'))` (notation rendered through built-in VexFlow); analyze with `s.analyze('key')`; play with `s.playStream()` (MIDI). Install via CDN (`music21.min.js`) or `npm install music21j`.
-- **Final artifact:** interactive in-browser notation with analysis annotations, plus MIDI playback (so the output spans visual notation, computed analysis, and audio).
+- **LLM emits:** a JavaScript ES module (`.js`/`.mjs`) exporting `buildScore(music21)`, returning a Score/Part/Stream constructed from notes, rests, chords and measures. This is JavaScript musical content, not an XML format or generated web application.
+- **Content prompt:** “Generate a happy upbeat classical song in C major, 16 bars in 4/4, with a memorable melody, simple piano accompaniment and a final cadence.” Serialization belongs to the solution guide, not the user's musical brief.
+- **Separate render step:** the host loads music21j and the generated module, calls `buildScore(music21)`, then `score.appendNewDOM(container)`. Playback controls and audio permissions belong to the viewer.
+- **MusicXML alternative:** request the separate `musicxml` asset type for XML score interchange. music21j can parse it with `new music21.musicxml.xmlToM21.ScoreParser().scoreFromText(xmlString)`.
+- **Final artifact:** the reusable musical score module; its rendered notation is a derived viewer result.
 
 ## Why
 - **Reach for it when:** you want music theory/analysis capability in the browser — music education and theory apps, basic in-browser analysis, interactive notation tied to analysis, academic musicology tools, and simple notation editing. Backed by MIT's established music21 research toolkit with MusicXML import/export.

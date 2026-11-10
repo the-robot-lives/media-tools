@@ -18,6 +18,7 @@ pub async fn interactive_refine_loop(
     output_paths: &[std::path::PathBuf],
     api_key: &str,
     gen_model: &str,
+    gen_service: &str,
     verbose: bool,
 ) {
     let mut current_text = prompt.payload.prompt.text.clone();
@@ -47,6 +48,40 @@ pub async fn interactive_refine_loop(
         } else {
             input.to_string()
         };
+
+        // Named profiles keep interactive text refinement on the same endpoint.
+        if let Some(profile) = crate::llm_profiles::selected()
+            .filter(|_| gen_service == crate::llm_profiles::PROFILE_SERVICE)
+        {
+            let request = format!(
+                "Original requirements:\n{}\n\nRequested change:\n{}",
+                current_text, feedback
+            );
+            let provider = crate::llm_profiles::ProfileProvider(profile.clone());
+            let options = GenerationOptions {
+                model: gen_model.to_string(),
+                aspect_ratio: None,
+                negative_prompt: None,
+                provider_options: prompt.payload.prompt.provider_options.clone(),
+                verbose,
+                duration_seconds: None,
+                audio_kind: prompt.meta.audio_kind,
+            };
+            let attachments = load_attachments(prompt).unwrap_or_default();
+            for output_path in output_paths {
+                let candidate = genai_candidate_path(output_path);
+                let previous = std::fs::read_to_string(output_path).unwrap_or_default();
+                let text = format!("{}\n\nPrevious output:\n{}", request, previous);
+                use crate::providers::ChatProvider;
+                match provider.generate(prompt.payload.prompt.system.as_deref().unwrap_or("Return only the complete revised source file, without Markdown fences."), &text, &candidate, "", &options, &attachments).await {
+                    Ok(true) => { if let Err(error) = link_active(&candidate, output_path) { tel::warn_msg(&format!("Cannot activate refinement: {error}")); } },
+                    Ok(false) => tel::warn_msg("Profile refinement failed"),
+                    Err(error) => tel::warn_msg(&format!("Profile refinement failed: {error}")),
+                }
+            }
+            current_text = request;
+            continue;
+        }
 
         progress::refine_started(&prompt.meta.id, 1, gen_model, "interactive feedback");
         tel::step("Refining prompt via LLM");
