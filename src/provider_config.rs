@@ -73,6 +73,43 @@ pub struct ProviderConfig {
     /// packaged and per-user `types.d/*.yaml` directories are out of scope here.
     #[serde(default)]
     pub types: BTreeMap<String, TypeEntry>,
+    /// Decision-judge (grading) overrides: backend, model, base URL and the
+    /// ordered credential sources. Absent fields defer to backend defaults —
+    /// see `crate::judge::JudgeConfig::resolve`.
+    #[serde(default)]
+    pub judge: JudgeSection,
+}
+
+/// `judge:` config section — overrides for the decision-model judge.
+///
+/// ```yaml
+/// judge:
+///   backend: alibaba        # alibaba | jev (default alibaba)
+///   model: decision-model-preview
+///   base: https://workspace.example/compatible-mode/v1   # literal override
+///   key:                    # ordered sources, first usable hit wins
+///     - env: QWEN_API_KEY
+///     - dc: { subject: services, key: apps.npl_mcp_qwen_api_key }
+/// ```
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct JudgeSection {
+    /// `alibaba` | `jev`.
+    #[serde(default)]
+    pub backend: Option<String>,
+    /// Judge model id (backend default: `decision-model-preview` / `jev-latest`).
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Literal base URL — replaces the env/dc base resolution chain.
+    #[serde(default)]
+    pub base: Option<String>,
+    /// Ordered credential sources (see `crate::secrets::SecretSource`).
+    #[serde(default)]
+    pub key: Option<Vec<crate::secrets::SecretSource>>,
+    /// Distribution policy: `strict` (exact Σp·i equality, the reference
+    /// contract) or `rounded` (hundredths-grid policy). Absent = auto-gated
+    /// (rounded for decision-model-preview and jev-* models, strict others).
+    #[serde(default)]
+    pub policy: Option<String>,
 }
 
 /// A single design §4.4 type-registry entry. Parsed, not yet routed (phase 0c).

@@ -894,7 +894,10 @@ fn strip_fences(s: &str) -> String {
     s.to_string()
 }
 
-fn build_score(parsed: &serde_json::Value, eval: &EvalSection, verbose: bool) -> Option<EvalScore> {
+/// Remap a scored JSON payload (`scores` 0-10 per criterion, `reject_hits`,
+/// `notes`) onto the eval section's weights; shared by the legacy LLM grader
+/// and the decision-judge bridge (`judge::score_result`).
+pub(crate) fn build_score(parsed: &serde_json::Value, eval: &EvalSection, verbose: bool) -> Option<EvalScore> {
     let scores_map = parsed["scores"].as_object()?;
 
     let mut weighted_sum = 0.0f64;
