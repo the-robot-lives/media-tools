@@ -63,7 +63,7 @@ are tagged on the original standalone-repo lineage preserved by the subtree squa
   and attainable-pre-image checks still reject distributions no unit-sum pre-rounding
   could produce, and both live payloads are pinned as fixtures. Image/video/audio outputs
   exit 2 until the Phase 2 observe step lands. Live backends smoke-tested via
-  `cargo test --test live_judge -- --ignored`. (2026-11-11)
+  `cargo test --test live_judge -- --ignored`. (#46) (2026-11-11)
 
 ### Fixed
 - The tool no longer panics while truncating text for display. Every preview of a string the
