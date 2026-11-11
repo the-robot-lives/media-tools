@@ -1290,7 +1290,7 @@ async fn run_eval_job(st: &AppState, body: &EvalBody) -> Result<serde_json::Valu
         .payload
         .eval
         .clone()
-        .unwrap_or_else(default_eval_for_type);
+        .unwrap_or_else(crate::eval::default_eval_for_type);
 
     let evaluator = Evaluator::resolve(None, None, st.inner.cfg.verbose)
         .await
@@ -1333,37 +1333,6 @@ async fn run_eval_job(st: &AppState, body: &EvalBody) -> Result<serde_json::Valu
     }
 }
 
-fn default_eval_for_type() -> crate::schema::EvalSection {
-    use crate::schema::{EvalCriterion, EvalSection};
-    let mut criteria = HashMap::new();
-    criteria.insert(
-        "relevance".into(),
-        EvalCriterion {
-            weight: Some(3.0),
-            scale: None,
-            description: Some("Matches the generation brief".into()),
-            fail_signals: vec![],
-        },
-    );
-    criteria.insert(
-        "quality".into(),
-        EvalCriterion {
-            weight: Some(2.0),
-            scale: None,
-            description: Some("Overall technical and aesthetic quality".into()),
-            fail_signals: vec![],
-        },
-    );
-    EvalSection {
-        pass_threshold: Some(0.7),
-        max_attempts: None,
-        required_pass: vec!["relevance".into()],
-        criteria,
-        reject_if: vec![],
-        mode: None,
-        visual: None,
-    }
-}
 
 fn find_sibling_prompt(media: &Path) -> Option<PathBuf> {
     let parent = media.parent()?;

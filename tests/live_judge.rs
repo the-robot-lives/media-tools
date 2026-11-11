@@ -106,6 +106,7 @@ async fn jev_live() {
 #[test]
 fn live_rubric_encodes() {
     let eval = media_tool::schema::EvalSection {
+        judge: None,
         pass_threshold: Some(0.7),
         max_attempts: None,
         required_pass: vec!["quality".into()],

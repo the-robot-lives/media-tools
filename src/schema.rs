@@ -256,6 +256,21 @@ pub struct EvalSection {
     /// When true, HTML/SVG may be rasterized (Puppeteer/rsvg) for vision scoring.
     #[serde(default)]
     pub visual: Option<bool>,
+    /// Grader for the LLM arm: `decision` (System One judge; images/video are
+    /// observed first) or `llm` (legacy text/vision LLM grader). Absent
+    /// resolves to `decision` when a judge backend is configured and to `llm`
+    /// otherwise — see `crate::eval`.
+    #[serde(default)]
+    pub judge: Option<String>,
+}
+
+impl EvalSection {
+    /// The requested grader for the LLM arm, before backend availability is
+    /// considered: `decision` | `llm` (None = caller decides the default).
+    // <REMOVED UUID HERE> effective_judge_request :: The requested grader for the LLM arm.
+    pub fn effective_judge_request(&self) -> Option<&str> {
+        self.judge.as_deref().map(str::trim).filter(|j| !j.is_empty())
+    }
 }
 
 impl EvalSection {

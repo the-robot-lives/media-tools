@@ -78,6 +78,43 @@ pub struct ProviderConfig {
     /// see `crate::judge::JudgeConfig::resolve`.
     #[serde(default)]
     pub judge: JudgeSection,
+    /// Prep/eval inference (qwen3.8-flash by default) and the vision observer
+    /// used by the observe -> decide judge path. See `crate::inference`.
+    #[serde(default)]
+    pub inference: InferenceSection,
+}
+
+/// `inference:` config section — the text LLM that distills/refines prompts and
+/// the vision model that observes generated artifacts for the decision judge.
+///
+/// ```yaml
+/// inference:
+///   model: qwen3.8-flash                # prep/eval chat model
+///   base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1  # literal override
+///   key:                                # ordered sources, first usable hit wins
+///     - env: QWEN_API_KEY
+///     - dc: { subject: services, key: apps.npl_mcp_qwen_api_key }
+///   observer_models:                    # vision chain for image/video judging
+///     - qwen3.8-flash                   # first model that actually answers wins
+///     - qwen-vl-plus
+/// ```
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct InferenceSection {
+    /// Prep/eval chat model (default `qwen3.8-flash`).
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Literal base URL — replaces the env/dc base resolution chain.
+    #[serde(default)]
+    pub base: Option<String>,
+    /// Ordered credential sources (see `crate::secrets::SecretSource`).
+    #[serde(default)]
+    pub key: Option<Vec<crate::secrets::SecretSource>>,
+    /// Vision-observer model chain for the observe -> decide judge path, best
+    /// first. The first model that answers with content wins; absent fields
+    /// defer to the compiled-in chain (empirically probed, see
+    /// `docs/quality-selection-and-eval.md`).
+    #[serde(default)]
+    pub observer_models: Option<Vec<String>>,
 }
 
 /// `judge:` config section — overrides for the decision-model judge.

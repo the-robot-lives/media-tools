@@ -125,6 +125,7 @@ fn probe_to_eval_score(probe: &StructuralProbe, eval: &EvalSection) -> EvalScore
         per_criterion,
         reject_hits: probe.reject_hits.clone(),
         notes: format!("[structural] {}", probe.notes),
+        judge: None,
     }
 }
 
@@ -438,6 +439,7 @@ mod tests {
             reject_if: vec!["silence or near-silence".into()],
             mode: None,
             visual: None,
+            judge: None,
         }
     }
 

@@ -21,6 +21,7 @@ pub mod dag;
 pub mod eval;
 pub mod fim;
 pub mod imagefmt;
+pub mod inference;
 pub mod judge;
 pub mod llm_profiles;
 pub mod orchestrator;

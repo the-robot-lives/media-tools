@@ -1226,6 +1226,11 @@ async fn run_eval_gated(
                 None,
                 None,
                 &prompt.payload.prompt.provider_options,
+                Some(&crate::output::EvalMeta {
+                    attempt: Some(attempt + 1),
+                    verdict: None,
+                    score: None,
+                }),
             );
 
             // Score (pass duration for structural/hybrid audio-video checks)
@@ -1286,6 +1291,11 @@ async fn run_eval_gated(
                         Some(w),
                         Some(&s.notes),
                         &prompt.payload.prompt.provider_options,
+                        Some(&crate::output::EvalMeta::from_score(
+                            attempt + 1,
+                            s.passes(eval_section),
+                            &s,
+                        )),
                     );
 
                     if config.verbose {
@@ -1474,6 +1484,8 @@ async fn run_legacy_variants(
     let options = build_options(candidate.model, prompt, config);
 
     let mut variant_paths: Vec<PathBuf> = Vec::new();
+    let mut variant_gens: Vec<GenerationInputs> = Vec::new();
+    let mut variant_models: Vec<String> = Vec::new();
     for v in 0..config.variant_count {
         let attempt_span = progress::attempt_span(
             &prompt_id,
@@ -1582,6 +1594,7 @@ async fn run_legacy_variants(
                 candidate.model,
                 &gen,
                 &prompt.payload.prompt.provider_options,
+                None,
             );
             progress::attempt_completed(
                 &prompt_id,
@@ -1592,6 +1605,8 @@ async fn run_legacy_variants(
                 progress::NO_SCORE,
             );
             variant_paths.push(genai_path);
+            variant_gens.push(gen);
+            variant_models.push(candidate.model.to_string());
         } else {
             progress::attempt_failed(
                 &prompt_id,
@@ -1625,27 +1640,57 @@ async fn run_legacy_variants(
         let refs: Vec<&std::path::Path> = variant_paths.iter().map(|p| p.as_path()).collect();
 
         if let Some(ev) = evaluator {
-            // Use LM Studio evaluator for best-of-N selection
-            let mut best_i = 0usize;
-            let mut best_score = -1.0f64;
-            let dummy_eval = crate::schema::EvalSection::default();
-            for (i, p) in refs.iter().enumerate() {
-                if let Some(score) = ev
-                    .score_output(p, &prompt.payload.prompt.text, &dummy_eval, config.verbose)
-                    .await
-                {
-                    if score.weighted > best_score {
-                        best_score = score.weighted;
-                        best_i = i;
-                    }
-                }
-            }
+            // Score against the prompt's own eval block when it has one, else
+            // the asset-type default. The old behavior scored against
+            // `EvalSection::default()` — no criteria, every weighted score
+            // 0.0, candidate 1 always "won".
+            let legacy_eval = prompt
+                .payload
+                .eval
+                .clone()
+                .unwrap_or_else(crate::eval::default_eval_for_type);
+            let (best_i, scores) = crate::eval::select_best_candidate(
+                &refs,
+                &prompt.payload.prompt.text,
+                &legacy_eval,
+                ev,
+                config.verbose,
+            )
+            .await;
+            let best_score = scores
+                .get(best_i)
+                .and_then(|s| s.as_ref())
+                .map(|s| s.weighted);
             tel::info(&format!(
-                "Selected candidate {} of {} (score={:.3})",
+                "Selected candidate {} of {} (score={})",
                 best_i + 1,
                 variant_paths.len(),
                 best_score
+                    .map(|w| format!("{:.3}", w))
+                    .unwrap_or_else(|| "n/a".into())
             ));
+            // Refresh each variant's sidecar with its eval outcome.
+            for (i, p) in variant_paths.iter().enumerate() {
+                let meta = match scores.get(i).and_then(|s| s.as_ref()) {
+                    Some(s) => crate::output::EvalMeta::from_score(i + 1, s.passes(&legacy_eval), s),
+                    None => crate::output::EvalMeta {
+                        attempt: Some(i + 1),
+                        verdict: None,
+                        score: None,
+                    },
+                };
+                write_variant_metadata(
+                    p,
+                    svc,
+                    variant_models
+                        .get(i)
+                        .map(|m| m.as_str())
+                        .unwrap_or("unknown"),
+                    &variant_gens[i],
+                    &prompt.payload.prompt.provider_options,
+                    Some(&meta),
+                );
+            }
             best_i
         } else {
             // Groq fallback
@@ -1822,6 +1867,7 @@ fn write_variant_metadata(
     model: &str,
     gen: &GenerationInputs,
     provider_options: &HashMap<String, serde_yaml::Value>,
+    eval_meta: Option<&crate::output::EvalMeta<'_>>,
 ) {
     write_metadata(
         genai_path,
@@ -1832,6 +1878,7 @@ fn write_variant_metadata(
         None,
         None,
         provider_options,
+        eval_meta,
     );
 }
 
@@ -2005,7 +2052,7 @@ mod tests {
 
         let dir = scratch_dir("sidecar");
         let asset = dir.join("asset.png");
-        write_variant_metadata(&asset, "gemini", "some-model", &gen, &HashMap::new());
+        write_variant_metadata(&asset, "gemini", "some-model", &gen, &HashMap::new(), None);
 
         let sidecar = std::fs::read_to_string(asset.with_extension("metadata.yaml")).unwrap();
         assert!(
@@ -2027,7 +2074,7 @@ mod tests {
         let gen = GenerationInputs::new("text".to_string(), Some("declared".to_string()));
         let dir = scratch_dir("sidecar-declared");
         let asset = dir.join("asset.png");
-        write_variant_metadata(&asset, "gemini", "some-model", &gen, &HashMap::new());
+        write_variant_metadata(&asset, "gemini", "some-model", &gen, &HashMap::new(), None);
         let sidecar = std::fs::read_to_string(asset.with_extension("metadata.yaml")).unwrap();
         assert!(sidecar.contains("declared"));
         let _ = std::fs::remove_dir_all(&dir);
