@@ -136,6 +136,24 @@ enum Commands {
     },
     /// List documented Gemini image models and the minimum-version policy (offline)
     Models,
+    /// Grade a generated output against the prompt's eval rubric (decision judge)
+    Judge {
+        /// The .media.prompt file whose eval section defines the rubric
+        #[arg(value_name = "PROMPT_FILE")]
+        prompt: PathBuf,
+        /// Generated output file to grade (svg/html/txt/md/code only)
+        #[arg(long, value_name = "PATH")]
+        output: PathBuf,
+        /// Judge backend: alibaba|jev (default: judge config or alibaba)
+        #[arg(long, value_name = "BACKEND")]
+        judge: Option<String>,
+        /// Judge model override (default: decision-model-preview / jev-latest)
+        #[arg(long, value_name = "ID")]
+        judge_model: Option<String>,
+        /// Emit machine-readable JSON instead of the human summary
+        #[arg(long)]
+        json: bool,
+    },
     /// Interactive web lab: browse types, generate, view, and eval media
     Lab {
         /// Listen port (default 8787)
@@ -193,6 +211,47 @@ async fn main() -> color_eyre::Result<()> {
     media_tool::llm_profiles::init(cli.llm_profile.as_deref())?;
 
     match cli.command {
+        Some(Commands::Judge {
+            prompt,
+            output,
+            judge: backend,
+            judge_model,
+            json,
+        }) => {
+            let verdict = media_tool::judge::run_cli(
+                &prompt,
+                &output,
+                backend.as_deref(),
+                judge_model.as_deref(),
+            )
+            .await;
+            match verdict {
+                Ok(verdict) => {
+                    if json {
+                        println!("{}", verdict.to_json_pretty());
+                    } else {
+                        print!("{}", verdict.render_human());
+                    }
+                    return Ok(());
+                }
+                Err(err)
+                    if err
+                        .downcast_ref::<media_tool::judge::ObserveRequired>()
+                        .is_some() =>
+                {
+                    // Image/video/audio grading needs the Phase 2 observe step.
+                    let kind = err
+                        .downcast_ref::<media_tool::judge::ObserveRequired>()
+                        .map(|o| o.0)
+                        .unwrap_or("this output kind");
+                    ui::fail_msg(&format!(
+                        "judge: {kind} outputs need an observe step — observe step lands in Phase 2"
+                    ));
+                    std::process::exit(2);
+                }
+                Err(err) => return Err(err),
+            }
+        }
         Some(Commands::Lab {
             port,
             demos,

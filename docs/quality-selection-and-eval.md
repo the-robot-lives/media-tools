@@ -119,6 +119,88 @@ Artifact handling by output extension:
 
 When no scorer can run, generation warns and accepts (legacy). Structural reject hits (e.g. silence) can fail the eval gate.
 
+## Decision judge (`judge` subcommand)
+
+Standalone grader for text-like outputs, ported from the Elixir reference
+(`genai` System One providers). Talks the **System One** wire protocol:
+`POST {base}/systemone` with bearer auth, request
+`{model, state, questions: {qid: {type, instructions, criteria}}}`, response
+`{answers: {qid: {choice|score|noul, probabilities, legend, confidence}},
+request_id, latency_ms, usage}`. Responses are decoded strictly (probability
+vector sums to 1 within 1e-6, choice == argmax, legend keys match the labels);
+the Alibaba **rounded-hundredths** policy (inferred wire precision:
+hundredths-grid probabilities, renormalized mass, attainable-band score check)
+applies itself automatically to `decision-model-preview` responses AND to
+`jev-*` models (user decision 2026-11-11 — live `jev-1.14.0` reports native
+`score` scalars that drift from Σp·i by up to 0.06, which exact equality
+rejects). Other models get the strict check only; `judge: policy: strict`
+forces exact Σp·i equality everywhere and `policy: rounded` forces the
+hundredths policy.
+
+One deliberate deviation from the Elixir reference (live capture 2026-11-11):
+real workspace traffic sums to as little as 0.98 across ten on-grid bins, so
+the reference's `min(count·0.005, 0.01)` mass tolerance rejects valid answers.
+The port widens the missing-mass allowance to the rounding-eaten bound
+`count × 0.005` — the bounds and attainable-pre-image checks still reject any
+distribution no unit-sum pre-rounding could have produced, and strict stays
+exact. Captured payloads are pinned as regression fixtures
+(`live_alibaba_missing_mass_within_rounding_slack_is_accepted`,
+`live_jev_score_drift_is_strict_rejected_rounded_accepted`).
+
+Limits: ≤255 choice options, ≤10 score levels, text-only state.
+
+### Backends & key resolution
+
+`--judge alibaba` (default) or `--judge jev`; `--judge-model` overrides the
+model. Each field resolves CLI > `judge:` config section (media-tool.yaml) >
+environment > dc store > backend default:
+
+| Field | Alibaba | Jev |
+|---|---|---|
+| model | `decision-model-preview` | `jev-latest` |
+| base | `QWEN_DECISION_BASE_URL` → dc `services apps.watching_qwen_base_url` (the dedicated decision workspace compatible-mode endpoint, shared with the codemoshiach C1 classifier) → `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `JEV_BASE_URL` → `https://api.typesafe.ai/v1` |
+| key | `QWEN_API_KEY` → `DASHSCOPE_API_KEY` → dc `services apps.npl_mcp_qwen_api_key` → dc `services apps.npl_mcp_dashscope_api_key` | `JEV_API_KEY` → `TYPESAFE_API_KEY` → dc `defaults inference.jev.key` |
+
+Secrets resolve through `src/secrets.rs`: env vars first (empty and literal
+`null` treated as absent), then `dc get <subject> <key> --reveal --raw`
+(missing binary, non-zero exit, empty output, literal `null` all absent).
+Scheme-less base values (the dc store keeps bare MaaS hosts) are assumed
+`https://`. Resolved values are held in a redacting newtype — they never reach
+logs, `Debug`, or error strings; diagnostics carry source *names* only. Keys
+fail closed: with no source usable the judge refuses to run.
+
+`judge:` config section (all fields optional):
+
+```yaml
+judge:
+  backend: alibaba        # alibaba | jev
+  model: decision-model-preview
+  base: https://workspace.example/compatible-mode/v1   # literal override
+  policy: strict          # strict | rounded (default: auto-gated by model)
+  key:                    # ordered sources, first usable hit wins
+    - env: QWEN_API_KEY
+    - dc: { subject: services, key: apps.npl_mcp_qwen_api_key }
+```
+
+### CLI
+
+```sh
+generate-media-prompt judge <file.media.prompt> --output <path> \
+  [--judge alibaba|jev] [--judge-model M] [--json]
+```
+
+Text-like outputs only (svg/html/txt/md/code/…); image/video/audio exit 2 —
+the observe step for non-text outputs lands in a later phase. The prompt's
+`eval` section becomes the rubric: each criterion → one 10-level `score`
+question (levels built from its `description` + `fail_signals`), each
+`reject_if` entry → a `noul` question. Per-criterion probabilities and the
+weighted score (`EvalScore` semantics shared with the generation-loop eval)
+print to the terminal; `--json` emits the full verdict including request_id,
+latency and token usage.
+
+Live smoke against both real backends: `cargo test --test live_judge --
+--ignored --nocapture` (skips cleanly when no credentials resolve).
+
 ## Duration
 
 `output.duration` (seconds, serde alias `length`) flows into `GenerationOptions.duration_seconds`

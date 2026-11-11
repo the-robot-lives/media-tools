@@ -46,6 +46,24 @@ are tagged on the original standalone-repo lineage preserved by the subtree squa
   reference resolution with a 16 KiB guidance budget, `make install` publishing the bundled
   references plus a `media-tool` symlink, and a Lit-by-default component policy with a new
   `lit-component` template. (#44) (2026-11-11)
+- Decision judge: a new `judge` subcommand grades a prompt file's text-like output against
+  its `eval` rubric over the System One wire protocol (`src/judge/`), ported from the genai
+  Elixir reference with strict response validation. Two backends — Alibaba
+  (decision-model-preview via the dedicated decision workspace compatible-mode endpoint,
+  dc `services apps.watching_qwen_base_url`) and Jev (jev-latest via TypeSafe) — selected
+  with `--judge`, model with `--judge-model`; base URLs and API keys resolve CLI > `judge:`
+  config section > environment > dc store > backend default through a redacting secrets
+  module (`src/secrets.rs`) that never logs or formats credential values. The
+  rounded-hundredths distribution policy applies automatically for `decision-model-preview`
+  and `jev-*` models (live Jev score scalars drift from Σp·i; user decision 2026-11-11),
+  with `judge: policy: strict|rounded` as an explicit override. One port deviation, forced
+  by live traffic: the reference's `min(count·0.005, 0.01)` mass tolerance rejects real
+  workspace answers (captured sums as low as 0.98 over ten on-grid bins), so the port
+  widens missing-mass allowance to the rounding-eaten bound `count × 0.005`; the bounds
+  and attainable-pre-image checks still reject distributions no unit-sum pre-rounding
+  could produce, and both live payloads are pinned as fixtures. Image/video/audio outputs
+  exit 2 until the Phase 2 observe step lands. Live backends smoke-tested via
+  `cargo test --test live_judge -- --ignored`. (2026-11-11)
 
 ### Fixed
 - The tool no longer panics while truncating text for display. Every preview of a string the
