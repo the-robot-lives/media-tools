@@ -179,3 +179,7 @@ consumer mode. Review evaluation export (evalonomi) is off, so nothing from revi
 here is sent there. The digests feed recall on later reviews of this repository.
 To keep a pull request out of review (and so out of memory), put `TRR:OFF` in its
 description; markdown-only pull requests are skipped unless the description carries `TRR:MD`.
+If both tokens are present, `TRR:OFF` wins: the opt-out gate is checked before the
+markdown opt-in, so the pull request is not reviewed and nothing is archived. Each digest
+is the review verdict summary for one pull request and head commit (no source files), and
+lives in the consumer organization for this installation on the memory service.
