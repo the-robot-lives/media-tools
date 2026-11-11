@@ -17,6 +17,7 @@ are tagged on the original standalone-repo lineage preserved by the subtree squa
   any source is handled rather than reported as corrupt. (2026-09-21)
 
 ### Added
+- PROJ-FAQ: "Does code review on this repository store anything outside GitHub?" — codemoshiach review memory via the service-consumer pipe, live 2026-11-11. (2026-11-11)
 - `provider_options.base_url` overrides the gemini API root, which is how the new
   stubbed-provider test drives the real provider. (2026-09-21)
 - Three chat-generated asset types join the registry: `cli-tool-mockup`

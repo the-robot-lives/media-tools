@@ -168,3 +168,12 @@ resolves to a LAN inference host (`192.168.68.59:3713`) or the cluster's
 or an unreachable evaluator skips this entirely. Generation itself always goes to
 whichever provider API you declared or was auto-selected (Gemini, Suno, ElevenLabs,
 etc.) per their own data-handling terms.
+
+### Does code review on this repository store anything outside GitHub? (2026-11-11)
+Yes, review memory only. As of 2026-11-11 the codemoshiach reviewer writes a short
+digest of each completed pull-request review to the agentic-memory service
+(`therobot.is`) through codemoshiach's single service-consumer key, under a consumer-owned
+organization keyed to this repository's GitHub App installation. No per-repo OAuth link
+is involved: a repository with no explicit memory mode and no prior link defaults to
+consumer mode. Review evaluation export (evalonomi) is off, so nothing from reviews
+here is sent there. The digests feed recall on later reviews of this repository.
