@@ -189,7 +189,12 @@ async fn edit_profile(store: &mut ProfileStore, existing: Option<String>) -> Res
         profile.provider,
         profile.model,
         profile.base_url,
-        profile.api_key_env.as_deref().unwrap_or("none")
+    // CodeQL rs/cleartext-logging: report key presence, never the api_key_env value.
+    if profile.api_key_env.is_some() {
+        "set"
+    } else {
+        "none"
+    }
     );
     if !confirmed(if store.profiles.contains_key(&id) {
         "Replace this saved profile?"

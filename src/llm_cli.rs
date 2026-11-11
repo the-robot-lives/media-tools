@@ -87,7 +87,13 @@ pub async fn run(command: LlmCommand, flag: Option<&str>, model: Option<&str>) -
                     p.provider,
                     p.model,
                     p.base_url,
-                    p.api_key_env.as_deref().unwrap_or("none (local)")
+                    // CodeQL rs/cleartext-logging: print key presence, never the
+                    // (name-pattern-matched) api_key_env value into a log sink.
+                    if p.api_key_env.is_some() {
+                        "set"
+                    } else {
+                        "none (local)"
+                    }
                 );
             }
             Ok(())
