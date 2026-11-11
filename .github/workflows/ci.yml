@@ -1,7 +1,8 @@
 name: CI
 
 # Marketing site image (context: web/ — Hologram Elixir release).
-# PR: Rust crate tests + coverage gate, site ExUnit, docker smoke.
+# PR (fast lane): plain Rust crate tests — NO coverage instrumentation
+# (nightly.yml owns the llvm-cov gate) — site ExUnit, docker smoke.
 # main: tests gate the image push of sha-*, then bump helm [skip ci].
 # develop pushes run the same checks to seed develop-ref caches for feature PRs.
 # ArgoCD auto-syncs helm/media-tool-landing @ main.
@@ -21,30 +22,20 @@ env:
   IMAGE: ops.noizu.com/media-tool.therobotlives.com/web
 
 jobs:
-  # generate-media-prompt crate. `#[ignore]`d tests (live DashScope, ~90s slow HTTP)
-  # stay out of acceptance; nightly.yml runs the offline slow one.
+  # generate-media-prompt crate — FAST lane: plain `cargo test`, no coverage
+  # instrumentation (llvm-cov gate re-tiered to nightly.yml). `#[ignore]`d tests
+  # (live DashScope, ~90s slow HTTP) stay out of acceptance; nightly.yml runs
+  # the offline slow one and the coverage gate.
   rust-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: rust-test
-      - uses: taiki-e/install-action@cargo-llvm-cov
-      # Gate = floor(acceptance line coverage) - 5 (measured 30.15% on 2026-10-07).
-      - name: Test + coverage gate
-        run: |
-          cargo llvm-cov --locked --lcov --output-path lcov.info --fail-under-lines 25
-          cargo llvm-cov report --summary-only
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: rust-coverage
-          path: lcov.info
-          if-no-files-found: ignore
+      - name: Fast test lane (no coverage)
+        run: cargo test --locked
 
   # Site ExUnit. No --cover: Hologram's compiler reads module BEAM files and
   # crashes ({:error, :non_existing}) on cover-compiled modules.
