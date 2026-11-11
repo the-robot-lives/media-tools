@@ -293,6 +293,9 @@ pub fn available(c: &Candidate) -> bool {
 
 /// Resolve the runtime API key for a service (DashScope family accepts several env names).
 pub fn resolve_api_key(service: &str) -> Option<String> {
+    if service == crate::llm_profiles::PROFILE_SERVICE {
+        return crate::llm_profiles::selected().map(|_| "profile-managed".into());
+    }
     match service {
         "qwen-tts" | "qwen-image" | "wan-video" | "happyhorse" => dashscope::resolve_key(),
         other => {
@@ -324,6 +327,11 @@ pub fn get_provider(service: &str) -> Option<Box<dyn MediaProvider>> {
 
 // <REMOVED UUID HERE> get_chat_provider :: auto-generated pointer for public function get_chat_provider
 pub fn get_chat_provider(service: &str) -> Option<Box<dyn ChatProvider>> {
+    if service == crate::llm_profiles::PROFILE_SERVICE {
+        return crate::llm_profiles::selected().map(|p| {
+            Box::new(crate::llm_profiles::ProfileProvider(p.clone())) as Box<dyn ChatProvider>
+        });
+    }
     match service {
         "anthropic" => Some(Box::new(anthropic::AnthropicProvider)),
         "gemini-chat" => Some(Box::new(gemini_chat::GeminiChatProvider)),
@@ -339,6 +347,9 @@ pub fn get_chat_provider(service: &str) -> Option<Box<dyn ChatProvider>> {
 
 // <REMOVED UUID HERE> is_stub_provider :: auto-generated pointer for public function is_stub_provider
 pub fn is_stub_provider(service: &str) -> bool {
+    if service == crate::llm_profiles::PROFILE_SERVICE {
+        return false;
+    }
     !matches!(
         service,
         "gemini"

@@ -1,4 +1,6 @@
-# React/TSX Component Generation
+# React/TSX Component Generation (Explicit Request)
+
+Use this template only when the user explicitly requests React, JSX/TSX, or a React-specific component contract. Unqualified `type: component` requests use [Lit by default](lit-component.md). `type: react-page` remains explicitly React.
 
 ## System Prompt
 
@@ -11,7 +13,7 @@ You are a React component generator. Output a single self-contained TSX file usi
 ```yaml
 schema: "0.4"
 id: hero-component
-type: html
+type: component
 quality: medium
 service: anthropic
 model: claude-opus-4-6

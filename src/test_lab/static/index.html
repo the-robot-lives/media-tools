@@ -482,6 +482,7 @@
 
     .hidden { display: none !important; }
   </style>
+<script src="/review-adapters.js"></script>
 </head>
 <body>
   <div class="top">
@@ -2018,22 +2019,7 @@ setTimeout(()=>{
     }
 
     function buildOsmdHtml(src) {
-      const xml = stripFences(src, "xml");
-      return `<!DOCTYPE html><html><head><meta charset="utf-8"/>
-<script src="${CDN.osmd}"><\/script>
-<style>body{margin:8px;background:#fff}#c{width:100%;overflow:auto}</style></head><body>
-<div id="c"></div>
-<script>
-(async()=>{
-  const xml=${JSON.stringify(xml)};
-  try{
-    const osmd=new opensheetmusicdisplay.OpenSheetMusicDisplay("c",{autoResize:true,backend:"svg",drawingParameters:"compacttight"});
-    await osmd.load(xml); osmd.render();
-  }catch(e){
-    document.getElementById("c").innerHTML="<pre style='color:#b00'>"+String(e)+"</pre><pre>"+xml.replace(/</g,"&lt;").slice(0,5000)+"</pre>";
-  }
-})();
-<\/script></body></html>`;
+      return MediaToolReview.osmdDocument(stripFences(src, "xml"));
     }
 
     function buildMarkdownHtml(src) {

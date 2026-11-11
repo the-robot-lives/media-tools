@@ -12,7 +12,8 @@ Decision tree for choosing which LLM provider and model to use for each media fo
 | Draw.io | anthropic | claude-sonnet-4-6 | Precise XML structure generation | openai-chat |
 | SVG illustration | anthropic | claude-sonnet-4-6 | Best SVG generation quality, clean paths | openai-chat |
 | HTML pages | anthropic | claude-sonnet-4-6 | Strong full-page HTML with inline CSS | z.ai |
-| React/TSX | anthropic | claude-opus-4-6 | Best at complex component architecture | openai-chat |
+| Lit component (default) | anthropic | claude-sonnet-4-6 | Standards-based LitElement component output | openai-chat |
+| React/TSX (explicit request) | anthropic | claude-opus-4-6 | Best at complex component architecture | openai-chat |
 | LaTeX | anthropic | claude-sonnet-4-6 | Strong math/document formatting | gemini-chat |
 | Typst | anthropic | claude-sonnet-4-6 | Good Typst syntax knowledge | gemini-chat |
 | ABC notation | gemini-chat | gemini-2.5-flash | Good at following notation syntax, fast | anthropic |
@@ -38,7 +39,11 @@ What are you generating?
 |   --> z.ai (simpler pages, fast iteration)
 |       temperature: 0.3
 |
-+-- React/TSX component?
++-- Component without an explicit React request?
+|   --> LitElement with Lit html/css, TypeScript (.ts) by default
+|   --> anthropic / claude-sonnet-4-6 or a configured chat profile
+|
++-- Explicit React/TSX component request?
 |   --> anthropic / claude-opus-4-6 (complex components)
 |   --> anthropic / claude-sonnet-4-6 (simple components)
 |       temperature: 0.2

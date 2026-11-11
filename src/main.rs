@@ -9,6 +9,8 @@
 //! [`term_layer::TermLayer`], which renders those events through `ui::*` exactly as the
 //! library used to print them itself.
 
+mod llm_cli;
+mod llm_tui;
 mod term_layer;
 
 use std::path::{Path, PathBuf};
@@ -58,6 +60,10 @@ struct Cli {
     #[arg(long)]
     refine: bool,
 
+    /// Named LLM profile (overrides MEDIA_TOOL_LLM_PROFILE and stored default)
+    #[arg(long, global = true, value_name = "NAME")]
+    llm_profile: Option<String>,
+
     /// Override generation model
     #[arg(long)]
     model: Option<String>,
@@ -101,6 +107,18 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Open a native document in a read-only browser review host
+    View {
+        path: PathBuf,
+        #[arg(long = "type")] kind: Option<String>,
+        #[arg(long, default_value_t = 0)] port: u16,
+        #[arg(long)] no_open: bool,
+    },
+    /// Configure and use named local/cloud LLM profiles
+    Llm {
+        #[command(subcommand)]
+        command: llm_cli::LlmCommand,
+    },
     /// Explain how the preference cascade resolves for a prompt file
     Explain {
         /// The .media.prompt file to explain
@@ -159,11 +177,20 @@ async fn main() -> color_eyre::Result<()> {
         return Ok(());
     }
 
+    if let Some(Commands::Llm { command }) = cli.command {
+        return llm_cli::run(command, cli.llm_profile.as_deref(), cli.model.as_deref()).await;
+    }
+
+    if let Some(Commands::View { path, kind, port, no_open }) = cli.command {
+        return media_tool::review::run(path, kind, port, !no_open).await;
+    }
+
     // Load .envrc.k8.dc for API keys (GEMINI, SUNO, OPENAI, ELEVENLABS, DASHSCOPE)
     orchestrator::load_envrc();
 
     // Load runtime provider/model overrides (local or remote YAML)
     provider_config::init().await;
+    media_tool::llm_profiles::init(cli.llm_profile.as_deref())?;
 
     match cli.command {
         Some(Commands::Lab {
@@ -193,6 +220,8 @@ async fn main() -> color_eyre::Result<()> {
             return orchestrator::explain_prompt(&prompt, &config);
         }
         // Offline command, handled above before env/provider init.
+        Some(Commands::View { .. }) => unreachable!("View handled before provider init"),
+        Some(Commands::Llm { .. }) => unreachable!("LLM commands handled before provider init"),
         Some(Commands::Models) => unreachable!("`models` is handled before provider init"),
         None => {}
     }
@@ -450,6 +479,9 @@ fn append_worker_args(command: &mut Command, cli: &Cli) {
     }
     if let Some(model) = &cli.model {
         command.arg("--model").arg(model);
+    }
+    if let Some(profile) = &cli.llm_profile {
+        command.arg("--llm-profile").arg(profile);
     }
     if cli.verbose {
         command.arg("--verbose");

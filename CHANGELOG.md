@@ -32,6 +32,20 @@ are tagged on the original standalone-repo lineage preserved by the subtree squa
   not; the test lab advertises all three kinds and the renderer. (2026-10-21)
 - `media-tool models` subcommand: prints the documented Gemini image models and the
   minimum-version policy offline, no API key or provider init required. (#20) (2026-10-26)
+- Named LLM profiles: connections live in `~/.config/media-tool/llm-profiles.yaml` (or
+  `MEDIA_TOOL_LLM_CONFIG`) with provider presets (openai, anthropic, groq, cerebras,
+  deepseek, zai, alibaba compatible-mode, openrouter, ollama, lmstudio, llamacpp, custom);
+  selection via `--llm-profile` / `MEDIA_TOOL_LLM_PROFILE` / stored default. Credentials
+  stay env-var references, never stored; config writes are atomic with 0600. A new `llm`
+  command family covers configure (TUI), list, add, default, import (LLM Toolkit /
+  queue-populator, never copies secrets), discover, test, and direct `generate`. Chat-backed
+  prompt files resolve to the selected profile as service `llm-profile` — prompt-file
+  service defaults are overridden, explicit `--service` still wins, and profile selection
+  leaves eval/prep to their own flags. Also: a read-only `view` review host
+  (src/review.rs) with shared test-lab review adapters, worktree/installed-binary FIM
+  reference resolution with a 16 KiB guidance budget, `make install` publishing the bundled
+  references plus a `media-tool` symlink, and a Lit-by-default component policy with a new
+  `lit-component` template. (#44) (2026-11-11)
 
 ### Fixed
 - The tool no longer panics while truncating text for display. Every preview of a string the

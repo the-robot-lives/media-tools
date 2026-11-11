@@ -27,8 +27,9 @@ const LOW_VALUE_SECTION_PREFIXES: &[&str] = &[
 ///
 /// Search order:
 /// 1. `MEDIA_FIM_DIR` env var (explicit override, may point anywhere)
-/// 2. `$INFRA_ROOT/utilities/agent/media-tool/skill/content-media-engine/references/fim/solution`
-/// 3. Walk up from the current working directory looking for the same relative path
+/// 2. Checkout-relative `skill/content-media-engine/references/fim/solution`
+/// 3. Installed `../share/media-tool/fim/solution`, then source-build checkout
+/// 4. Modern INFRA_ROOT checkout and legacy utility-relative paths
 ///
 /// Returns `None` if nothing resolves — callers fall back to static guidance.
 // <REMOVED UUID HERE> resolve_solution_dir :: Resolve the absolute path to the bundled `fim/solution/` directory, if it can be found.
@@ -41,26 +42,51 @@ pub fn resolve_solution_dir() -> Option<PathBuf> {
         }
     }
 
-    const TAIL: &str =
+    const CHECKOUT_TAIL: &str = "skill/content-media-engine/references/fim/solution";
+    const LEGACY_TAIL: &str =
         "utilities/agent/media-tool/skill/content-media-engine/references/fim/solution";
 
-    // 2. INFRA_ROOT-relative (matches main.rs:173 convention)
-    if let Ok(root) = std::env::var("INFRA_ROOT") {
-        let p = PathBuf::from(&root).join(TAIL);
-        if p.is_dir() {
-            return Some(p);
-        }
-    }
-
-    // 3. Walk up from CWD
+    // Modern checkout/worktree layout, walking from the invocation directory.
     if let Ok(cwd) = std::env::current_dir() {
-        let mut cursor: Option<&Path> = Some(&cwd);
-        while let Some(dir) = cursor {
-            let candidate = dir.join(TAIL);
+        for dir in cwd.ancestors() {
+            let candidate = dir.join(CHECKOUT_TAIL);
             if candidate.is_dir() {
                 return Some(candidate);
             }
-            cursor = dir.parent();
+        }
+    }
+    // Installed binaries can be invoked anywhere, independent of the working directory.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(prefix) = exe.parent().and_then(Path::parent) {
+            let candidate = prefix.join("share/media-tool/fim/solution");
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
+        }
+    }
+    // A source build remains usable before `make install` copies bundled guides.
+    let compiled_checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(CHECKOUT_TAIL);
+    if compiled_checkout.is_dir() {
+        return Some(compiled_checkout);
+    }
+
+    if let Ok(root) = std::env::var("INFRA_ROOT") {
+        for tail in [
+            "Projects/media-tools/skill/content-media-engine/references/fim/solution",
+            LEGACY_TAIL,
+        ] {
+            let candidate = PathBuf::from(&root).join(tail);
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        for dir in cwd.ancestors() {
+            let candidate = dir.join(LEGACY_TAIL);
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
         }
     }
 
@@ -270,12 +296,30 @@ pub fn guidance_for(
     if content.trim().is_empty() {
         None
     } else {
-        Some(content)
+        Some(bound_guidance(&content))
     }
+}
+
+// Keep injected references within a practical local-model context budget.
+fn bound_guidance(content: &str) -> String {
+    const MAX_BYTES: usize = 16 * 1024;
+    if content.len() <= MAX_BYTES {
+        return content.to_string();
+    }
+    format!("{}\n\n[Reference excerpt truncated to fit the generation context; follow the requested output contract.]", crate::text::truncate(content, MAX_BYTES))
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn injected_guidance_has_a_utf8_safe_context_budget() {
+        let source = "λ".repeat(20000);
+        let bounded = super::bound_guidance(&source);
+        assert!(bounded.len() < 16600);
+        assert!(bounded.contains("Reference excerpt truncated"));
+        assert_eq!(super::bound_guidance("short guide"), "short guide");
+    }
+
     use super::*;
 
     #[test]
@@ -360,7 +404,7 @@ mod tests {
             ("dot", true),
             ("html", true),
             ("md", true),
-            ("svg", true), // maps to svg_js.md
+            ("svg", true),         // maps to svg_js.md
             ("tape", true),        // media-tool-native: vhs tape script
             ("js-shell", true),    // media-tool-native: SemTextShell pack
             ("react-page", false), // intentionally unmapped
@@ -395,7 +439,14 @@ mod tests {
         if resolve_solution_dir().is_none() {
             return;
         }
-        for svc in ["gemini", "veo", "grok-video", "suno", "openai-tts", "elevenlabs"] {
+        for svc in [
+            "gemini",
+            "veo",
+            "grok-video",
+            "suno",
+            "openai-tts",
+            "elevenlabs",
+        ] {
             let p = solution_for(svc, AssetType::Image, None);
             // gemini maps via provider; non-image types still use provider map by service
             let p = p.or_else(|| {

@@ -589,7 +589,7 @@ pub async fn run_generation(
         if config.refine && succeeded > 0 {
             // Use actual service for refinement (first candidate's service)
             let refine_service = candidates[0].service;
-            let refine_model = candidates[0].model;
+            let refine_model = config.model_override.as_deref().unwrap_or(candidates[0].model);
             let refine_key = resolve_api_key(refine_service).unwrap_or_default();
 
             interactive_refine_loop(
@@ -597,6 +597,7 @@ pub async fn run_generation(
                 &path_results,
                 &refine_key,
                 refine_model,
+                refine_service,
                 config.verbose,
             )
             .await;
@@ -791,6 +792,13 @@ fn resolve_candidates(
         }];
     }
 
+    // A selected text profile overrides prompt-file defaults, but not --service.
+    if prompt.meta.asset_type.is_chat_type() {
+        if let Some(candidate) = crate::llm_profiles::selected_candidate() {
+            return vec![candidate];
+        }
+    }
+
     // Priority 2: YAML service: pinned
     if let Some(ref svc) = prompt.meta.service {
         let model = config
@@ -824,6 +832,15 @@ fn resolve_display_service(
             .unwrap_or_else(|| providers::default_model(svc))
             .to_string();
         return (svc.clone(), model);
+    }
+
+    if prompt.meta.asset_type.is_chat_type() {
+        if let Some(p) = crate::llm_profiles::selected() {
+            return (
+                crate::llm_profiles::PROFILE_SERVICE.into(),
+                config.model_override.as_deref().unwrap_or(&p.model).into(),
+            );
+        }
     }
 
     if let Some(ref svc) = prompt.meta.service {
@@ -890,7 +907,8 @@ fn effective_text_format(prompt: &ParsedPrompt) -> Option<&str> {
         .filter(|f| {
             matches!(
                 f.to_lowercase().as_str(),
-                "svg"
+                "xml"
+                    | "svg"
                     | "mmd"
                     | "mermaid"
                     | "puml"
@@ -919,6 +937,9 @@ fn text_inference_system_prompt(
     }
 
     let mut sections = Vec::new();
+    if prompt.meta.asset_type == AssetType::Component {
+        sections.push("Component framework policy: Default to a Lit web component (LitElement with TypeScript), unless the user's prompt, output format or system instructions explicitly request React/JSX/TSX. Follow explicit framework requests. Return only the requested source code.".to_string());
+    }
     if let Some(solution) = crate::fim::guidance_for(
         svc,
         prompt.meta.asset_type,
