@@ -177,3 +177,5 @@ organization keyed to this repository's GitHub App installation. No per-repo OAu
 is involved: a repository with no explicit memory mode and no prior link defaults to
 consumer mode. Review evaluation export (evalonomi) is off, so nothing from reviews
 here is sent there. The digests feed recall on later reviews of this repository.
+To keep a pull request out of review (and so out of memory), put `TRR:OFF` in its
+description; markdown-only pull requests are skipped unless the description carries `TRR:MD`.
