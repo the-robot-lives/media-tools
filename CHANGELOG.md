@@ -46,6 +46,13 @@ are tagged on the original standalone-repo lineage preserved by the subtree squa
   reference resolution with a 16 KiB guidance budget, `make install` publishing the bundled
   references plus a `media-tool` symlink, and a Lit-by-default component policy with a new
   `lit-component` template. (#44) (2026-11-11)
+- Media Workbench v2 design package: `docs/design/media-workbench-v2.md` extends the v1
+  spec with request intake, suitability pre-flight, decision-model grading (per-criterion
+  probability distribution strips), layered style composites, and connected accounts
+  (memory archive + eval export). Ships the 7 user-approved screen comps with their
+  generation prompts in `macos/screens/`, GUI user stories US-101..US-127 under
+  `project-management/user-stories/` (index appended), and a pointer from the v1 doc.
+  (#45) (2026-11-11)
 
 ### Fixed
 - The tool no longer panics while truncating text for display. Every preview of a string the

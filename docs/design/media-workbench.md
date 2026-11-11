@@ -1,6 +1,9 @@
 # Media Workbench — Desktop App Design
 
 Status: **draft for review** · Author: Loom · Date: 2026-09-16
+
+Extended by `media-workbench-v2.md` (2026-11-11).
+
 **Goal: a macOS application for the end-to-end media-tool cycle.** Linux and
 Windows are planned (§3.2) but explicitly not the target of this milestone —
 every sequencing decision below optimises for reaching a working macOS app,

@@ -1,0 +1,57 @@
+# Media Workbench v2 — screen comp S2+S3: Settings → Accounts and Settings → Judges (conventional, macOS light appearance)
+# Two Settings windows side by side on one comp board: a single settings window can only show one tab,
+# and the brief needs both the Accounts rows and the Judges test result in one image.
+schema: "0.4"
+id: mw-screen-settings-accounts
+type: image
+service: gemini
+model: gemini-3.1-flash-image
+quality: high
+prompt:
+  text: |
+    A straight-on screenshot of two macOS 14 Sonoma Settings windows side by side on a plain light grey desktop, light system appearance, SF Pro type, each with traffic lights and a toolbar of icon tabs labelled "Keys", "Preferences", "Judges", "Accounts". The app is a media-generation workbench; these settings connect online accounts and the automated grading judge.
+
+    Left window, "Accounts" tab selected. A grouped form with two rows, each with a service icon, name, status and a button:
+    - "therobot.is" · green dot "Connected" · caption "memory:read memory:write" · "Last sync 2m ago" · secondary button "Disconnect".
+    - "evalonomi.com" · grey dot "Not connected" · caption "Eval runs, traces, style layers" · blue button "Connect…".
+    Below, a group "This workspace" with a pop-up "Send runs to: My account".
+    A muted footnote: "Disconnecting never deletes remote data."
+
+    Right window, "Judges" tab selected. A grouped form:
+    - "Backend": segmented control "Alibaba | Jev", Alibaba selected.
+    - "Model": pop-up "decision-model-preview".
+    - "Key": "Keychain" with a small green check.
+    - "Base URL": a filled text field showing "workspace URL" with a green check.
+    - "Agreement mode": a switch, off.
+    - A "Test" button, and beside it a small result panel: green check "Pass", "412 ms", "Answer 7 / 10", "p 0.64".
+
+    Tidy native settings forms, labels left, controls right, generous spacing. Short legible labels and numbers only.
+  negative: >
+    garbled text, lorem ipsum, watermark, mobile frame, browser chrome, Windows UI,
+    perspective tilt, synthesizer/audio-hardware look, CAD tool, manuscript editor,
+    dark mode, login web page, password dots, API key strings, personal names, email addresses, emoji icons
+  style: "UI design screen comp, straight-on screenshot framing, no perspective, no camera tilt, crisp pixel-sharp interface"
+output:
+  formats:
+    - format: png
+      quality: 95
+  dimensions:
+    width: 2560
+    height: 1600
+    aspect_ratio: "16:10"
+eval:
+  pass_threshold: 0.7
+  criteria:
+    depicts_the_product:
+      weight: 0.4
+      description: "reads as a media-generation request/review/grading tool, specifically its settings for connected accounts (memory and eval services) and the automated grading judge"
+    follows_spec:
+      weight: 0.35
+      description: "shows (1) an Accounts row for therobot.is marked Connected with scopes and Disconnect; (2) an Accounts row for evalonomi.com with a Connect button; (3) a Judges tab with Alibaba backend and decision-model-preview model; (4) a Test result showing pass, latency and an answer"
+    macos_native:
+      weight: 0.25
+      description: "reads as native macOS 14 Settings windows with icon toolbar tabs, grouped forms, switches and pop-up buttons"
+  reject_if:
+    - depicts a different product category (web login page, CAD tool, manuscript editor, audio hardware)
+    - primary labels (therobot.is, evalonomi.com, Connect, decision-model-preview, Test) are unreadable or garbled
+tags: [screen-comp, macos, media-workbench, v2]

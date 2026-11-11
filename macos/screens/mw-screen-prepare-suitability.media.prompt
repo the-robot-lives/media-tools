@@ -1,0 +1,54 @@
+# Media Workbench v2 — screen comp R2: Prepare (drafted-prompt diff) + Suitability card (conventional document, macOS light appearance)
+schema: "0.4"
+id: mw-screen-prepare-suitability
+type: image
+service: gemini
+model: gemini-3.1-flash-image
+quality: high
+prompt:
+  text: |
+    A straight-on screenshot of a macOS 14 Sonoma app window, light system appearance, SF Pro type, traffic lights, unified toolbar titled "pricing-hero" with a small subtitle "Request R-014". The app is a media-generation workbench; this screen reviews an AI-drafted prompt before any money is spent generating.
+
+    Left: the translucent source-list sidebar: "Requests 3" (selected), "Library", "Runs 2", "Styles", divider, "Settings".
+
+    Centre (about 55% width): a readable document pane showing a short YAML file in SF Mono as a diff with exactly seven numbered lines, gutter numbers 1 to 7 in order. Lines 1, 2, 3, 4 and 7 are additions: pale green background with a "+" in the gutter, reading exactly "+type: image", "+service: gemini", "+width: 2560", "+height: 1600", "+palette: house". Line 5 is pale red with a "−" in the gutter: "−quality: draft". Line 6 is pale green with a "+": "+quality: high". Nothing else in the pane — no ellipsis line, no line of dots, no trailing rows. A thin bar above the diff with three buttons: "Accept", "Accept partial", "Reject".
+
+    Right (about 30% width): one white rounded card titled "Suitability", with a small chip "alibaba · decision-model-preview".
+    - Large bold text "Needs revision" with "52%" at right.
+    - Directly under it, one horizontal element divided into four adjoining coloured segments of unequal widths, the widest one orange, each segment carrying exactly its own text: "ready 31", "needs-revision 52", "wrong-type 11", "mismatch 6". All four segments fit inside the card with a small margin — nothing clipped at the card edge.
+    - Two rows, each: exactly ten small square cells in one row — count them, exactly 10 cells, nine dark grey and one white, the white one at position 9 of 10 — plus a thin vertical tick directly above the white cell. The row labels are "Specificity 6.4" and "Constraint fit 7.8" with no other words anywhere on these two rows.
+    - One short reason line: "Usage says dark bg; prompt omits it".
+    - A row of small rounded provenance chips: "house:palette", "project:voice", "house:construction".
+    - Buttons stacked at the bottom of the card: one blue primary "Revise with feedback", a secondary "Change type…", and a plain text link "Generate anyway".
+
+    Document-like, readable, calm; semantic colour only on the emphatic text described above. On screen, only the exact strings quoted above appear — no other words.
+  negative: >
+    garbled text, lorem ipsum, watermark, mobile frame, browser chrome, Windows UI,
+    perspective tilt, synthesizer/audio-hardware look, CAD tool, manuscript editor,
+    chat bubbles, dark mode, pie chart, gauge dial, emoji icons, long paragraphs of code,
+    ellipsis lines of dots, stray caption text, cells beyond ten per row, clipped text
+  style: "UI design screen comp, straight-on screenshot framing, no perspective, no camera tilt, crisp pixel-sharp interface"
+output:
+  formats:
+    - format: png
+      quality: 95
+  dimensions:
+    width: 2560
+    height: 1600
+    aspect_ratio: "16:10"
+eval:
+  pass_threshold: 0.7
+  criteria:
+    depicts_the_product:
+      weight: 0.4
+      description: "reads as a media-generation request/review/grading tool, specifically a pre-flight review of an AI-drafted prompt file with a judge verdict on whether it is suitable to generate"
+    follows_spec:
+      weight: 0.35
+      description: "shows (1) a YAML prompt as a diff with Accept / Accept partial / Reject; (2) a Suitability card with a four-segment probability bar (ready / needs-revision / wrong-type / mismatch), not only the winner; (3) 10-cell distribution strips for specificity and constraint fit; (4) provenance chips and a 'Generate anyway' override path"
+    macos_native:
+      weight: 0.25
+      description: "reads as a native macOS 14 light-appearance document window with source-list sidebar, SF type and system buttons"
+  reject_if:
+    - depicts a different product category (chat app, code IDE only, CAD tool, manuscript editor, audio hardware, web page)
+    - primary labels (Suitability, Needs revision, the four outcome labels) are unreadable or garbled
+tags: [screen-comp, macos, media-workbench, v2]
