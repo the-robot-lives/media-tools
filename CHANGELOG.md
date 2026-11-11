@@ -15,7 +15,7 @@ are tagged on the original standalone-repo lineage preserved by the subtree squa
   verdict, per-criterion scores, judge/observer identity and probability
   distributions. Best-of-N no longer scores against an empty eval (which
   pinned candidate 1 at 0.0): candidates score against the prompt's own
-  `eval:` block or the asset-type default. (2026-11-11)
+  `eval:` block or the asset-type default. (#48) (2026-11-11, on develop)
 
 ### Fixed
 - A prompt declaring `format: png` no longer ships JPEG bytes in a `.png` file. The gemini
