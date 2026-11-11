@@ -1,0 +1,58 @@
+# Media Workbench v2 — screen comp R3: Results + Grade v2 drawer (DARKROOM — the only Darkroom comp in the set)
+schema: "0.4"
+id: mw-screen-results-grade-v2
+type: image
+service: gemini
+model: gemini-3.1-flash-image
+quality: high
+prompt:
+  text: |
+    A straight-on screenshot of a macOS 14 app window in a near-black "darkroom" treatment for judging generated images. Canvas #0A0A0B, panels #141415, primary text #E8E6E3, secondary text #8A8785, a single warm brass accent #C9A227 used only for the selection ring. Green #4ADE80 and red #F87171 appear only as pass/fail gates. SF Pro type, SF Mono for numbers. Traffic lights top left; no sidebar on this screen.
+
+    Top: a slim one-line context bar on #141415: "pricing-hero · gemini/gemini-3.1-flash-image · attempt 3/4 · 1m42s · $0.06".
+
+    Centre-left: the hero artifact, a vivid generated illustration (abstract layered glass panels in deep teal and coral on dark, a website pricing hero), fit inside the field with dark margin, not cropped. It is the brightest, most colourful thing on screen.
+
+    Bottom: a left-aligned candidate rail of four thumbnails, each with a small circular score badge pinned to the bottom-right corner of the thumbnail, never covering the centre of the image: "84" green badge with a 2pt brass ring (selected), "78" green badge, "61" red badge, and a fourth placeholder tile with a thin progress bar "62%", its badge equally pinned to the bottom-right corner.
+
+    Right: a 320pt drawer on #141415 over the field, titled "Grade", with a small chip "alibaba · decision-model-preview".
+    - Header: "84 / 100" large, and a small green "PASSED".
+    - Four criterion rows, each: name, weight × score, a provenance chip, and below it exactly ten small square cells in a row; NOT a gradient; most cells near-black; probability shown by brightness, not by position along a ramp; a thin light tick marks the expected score:
+      "composition 0.35 × 88" chip "prompt" — a single very bright cell at position 9 (or 8), neighbours dim — confident;
+      "palette 0.30 × 86" chip "house:palette" — a single very bright cell at position 9 (or 8), neighbours dim — confident;
+      "legibility 0.20 × 79" chip "house:type", small "required" — a single very bright cell at position 9 (or 8), neighbours dim — confident;
+      "brand-voice 0.15 × 74" chip "project:voice" — two separate bright cells at positions 3 and 8 with dark cells between — uncertain, with a tiny diamond marker.
+    - A divider, then two small rows: "reject_if  embedded text  P 0.04" and "watermark  P 0.02".
+    - At the bottom two small buttons: "Override…" and "Revise".
+
+    Artifact dominant, chrome recedes, numbers crisp. Short legible labels and numbers only.
+  negative: >
+    garbled text, lorem ipsum, watermark, mobile frame, browser chrome, Windows UI,
+    perspective tilt, synthesizer/audio-hardware look, CAD tool, manuscript editor,
+    blue or teal UI accent, neon glow, glassmorphism chrome, light mode, sidebar, pie chart, gauge dial,
+    gradient bar, progress bar ramp, gauge, badge centred over image
+  style: "UI design screen comp, straight-on screenshot framing, no perspective, no camera tilt, crisp pixel-sharp interface, Lightroom-like restraint"
+output:
+  formats:
+    - format: png
+      quality: 95
+  dimensions:
+    width: 2560
+    height: 1600
+    aspect_ratio: "16:10"
+eval:
+  pass_threshold: 0.7
+  criteria:
+    depicts_the_product:
+      weight: 0.4
+      description: "reads as a media-generation request/review/grading tool, specifically judging generated image candidates with per-criterion scores from an automated judge"
+    follows_spec:
+      weight: 0.35
+      description: "shows (1) a dominant generated artifact plus a left-aligned scored candidate rail with gate-coloured badges and a brass selection ring; (2) a right Grade drawer with a weighted total and per-criterion 10-cell distribution strips with an expected-score tick, at least one visibly split; (3) provenance chips such as house:palette and project:voice; (4) the one-line context bar naming run, provider/model, attempt and cost"
+    macos_native:
+      weight: 0.25
+      description: "reads as a native macOS 14 window (traffic lights, SF type) in a dark custom treatment, not a web dashboard"
+  reject_if:
+    - depicts a different product category (photo-editing suite without scores, CAD tool, manuscript editor, audio hardware, web page)
+    - primary labels (criterion names, scores, 84 / 100) are unreadable or garbled
+tags: [screen-comp, macos, media-workbench, v2]

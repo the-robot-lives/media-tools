@@ -734,3 +734,193 @@ user_stories:
     priority: could-have
     personas: [P-003]
     file: US-088-fast-yaml-parsing.md
+  # Epic: Media Workbench (GUI)
+  - id: US-101
+    title: "Describe a needed asset without writing YAML"
+    slug: gui-request-intake
+    epic: "Media Workbench (GUI)"
+    priority: must-have
+    personas: [P-008, P-002, P-006]
+    file: US-101-gui-request-intake.md
+  - id: US-102
+    title: "Review an LLM-drafted prompt as a diff and accept part of it"
+    slug: gui-review-drafted-prompt-diff
+    epic: "Media Workbench (GUI)"
+    priority: must-have
+    personas: [P-002, P-006, P-008]
+    file: US-102-gui-review-drafted-prompt-diff.md
+  - id: US-103
+    title: "Check a prompt's suitability before spending money"
+    slug: gui-suitability-check
+    epic: "Media Workbench (GUI)"
+    priority: must-have
+    personas: [P-008, P-006, P-002]
+    file: US-103-gui-suitability-check.md
+  - id: US-104
+    title: "Generate anyway, with the override recorded"
+    slug: gui-suitability-override
+    epic: "Media Workbench (GUI)"
+    priority: should-have
+    personas: [P-006, P-002]
+    file: US-104-gui-suitability-override.md
+  - id: US-105
+    title: "Fix a type or provider mismatch from the verdict"
+    slug: gui-suitability-fix-type-provider
+    epic: "Media Workbench (GUI)"
+    priority: should-have
+    personas: [P-008, P-002]
+    file: US-105-gui-suitability-fix-type-provider.md
+  - id: US-106
+    title: "See generation progress and cancel it"
+    slug: gui-generate-progress-cancel
+    epic: "Media Workbench (GUI)"
+    priority: must-have
+    personas: [P-002, P-008, P-007]
+    file: US-106-gui-generate-progress-cancel.md
+  - id: US-107
+    title: "A generation keeps running when the window closes"
+    slug: gui-generation-survives-window-close
+    epic: "Media Workbench (GUI)"
+    priority: must-have
+    personas: [P-002, P-006]
+    file: US-107-gui-generation-survives-window-close.md
+  - id: US-108
+    title: "Compare candidates in the Darkroom results view"
+    slug: gui-compare-candidates
+    epic: "Media Workbench (GUI)"
+    priority: must-have
+    personas: [P-006, P-002]
+    file: US-108-gui-compare-candidates.md
+  - id: US-109
+    title: "Read per-criterion score distributions in Grade v2"
+    slug: gui-grade-v2-distributions
+    epic: "Media Workbench (GUI)"
+    priority: must-have
+    personas: [P-006]
+    file: US-109-gui-grade-v2-distributions.md
+  - id: US-110
+    title: "Trace a criterion back to the style rule that created it"
+    slug: gui-grade-provenance
+    epic: "Media Workbench (GUI)"
+    priority: should-have
+    personas: [P-006, P-002]
+    file: US-110-gui-grade-provenance.md
+  - id: US-111
+    title: "See when two judges disagree"
+    slug: gui-grade-judge-agreement
+    epic: "Media Workbench (GUI)"
+    priority: could-have
+    personas: [P-006]
+    file: US-111-gui-grade-judge-agreement.md
+  - id: US-112
+    title: "Override a grade with a reason"
+    slug: gui-override-grade
+    epic: "Media Workbench (GUI)"
+    priority: must-have
+    personas: [P-006, P-002]
+    file: US-112-gui-override-grade.md
+  - id: US-113
+    title: "Revise from a candidate and see whether it helped"
+    slug: gui-revise-lineage
+    epic: "Media Workbench (GUI)"
+    priority: should-have
+    personas: [P-002, P-006]
+    file: US-113-gui-revise-lineage.md
+  - id: US-114
+    title: "Define a house or project palette with WCAG contrast checks"
+    slug: gui-style-palette-layer
+    epic: "Media Workbench (GUI)"
+    priority: must-have
+    personas: [P-006, P-007]
+    file: US-114-gui-style-palette-layer.md
+  - id: US-115
+    title: "Define a project's copy voice"
+    slug: gui-style-copy-voice
+    epic: "Media Workbench (GUI)"
+    priority: should-have
+    personas: [P-008, P-006, P-002]
+    file: US-115-gui-style-copy-voice.md
+  - id: US-116
+    title: "Set element construction rules"
+    slug: gui-style-element-construction
+    epic: "Media Workbench (GUI)"
+    priority: could-have
+    personas: [P-006]
+    file: US-116-gui-style-element-construction.md
+  - id: US-117
+    title: "Inherit, override, suppress or append rubric rules per layer"
+    slug: gui-rubric-layer-ops
+    epic: "Media Workbench (GUI)"
+    priority: must-have
+    personas: [P-006]
+    file: US-117-gui-rubric-layer-ops.md
+  - id: US-118
+    title: "View the effective composite with provenance"
+    slug: gui-effective-composite
+    epic: "Media Workbench (GUI)"
+    priority: must-have
+    personas: [P-006, P-002]
+    file: US-118-gui-effective-composite.md
+  - id: US-119
+    title: "Compose styles offline"
+    slug: gui-offline-compose-fallback
+    epic: "Media Workbench (GUI)"
+    priority: should-have
+    personas: [P-002, P-006, P-001]
+    file: US-119-gui-offline-compose-fallback.md
+  - id: US-120
+    title: "Configure and test a judge backend"
+    slug: gui-judges-config-test
+    epic: "Media Workbench (GUI)"
+    priority: must-have
+    personas: [P-006, P-002]
+    file: US-120-gui-judges-config-test.md
+  - id: US-121
+    title: "Connect therobot.is and recall what worked before"
+    slug: gui-therobot-connect-recall
+    epic: "Media Workbench (GUI)"
+    priority: should-have
+    personas: [P-002, P-008, P-006]
+    file: US-121-gui-therobot-connect-recall.md
+  - id: US-122
+    title: "Archive promoted attempts to therobot.is"
+    slug: gui-therobot-archive
+    epic: "Media Workbench (GUI)"
+    priority: should-have
+    personas: [P-002, P-006]
+    file: US-122-gui-therobot-archive.md
+  - id: US-123
+    title: "Connect evalonomi and export graded runs"
+    slug: gui-evalonomi-connect-export
+    epic: "Media Workbench (GUI)"
+    priority: should-have
+    personas: [P-006]
+    file: US-123-gui-evalonomi-connect-export.md
+  - id: US-124
+    title: "Sync style layers with evalonomi by checksum"
+    slug: gui-evalonomi-layer-sync
+    epic: "Media Workbench (GUI)"
+    priority: could-have
+    personas: [P-006]
+    file: US-124-gui-evalonomi-layer-sync.md
+  - id: US-125
+    title: "Hear distribution strips with VoiceOver"
+    slug: gui-voiceover-distribution-strips
+    epic: "Media Workbench (GUI)"
+    priority: must-have
+    personas: [P-007]
+    file: US-125-gui-voiceover-distribution-strips.md
+  - id: US-126
+    title: "Grade and promote with the keyboard only"
+    slug: gui-keyboard-only-grading
+    epic: "Media Workbench (GUI)"
+    priority: must-have
+    personas: [P-007, P-006]
+    file: US-126-gui-keyboard-only-grading.md
+  - id: US-127
+    title: "See unavailable media types disabled with an install hint"
+    slug: gui-capability-disabled-types
+    epic: "Media Workbench (GUI)"
+    priority: should-have
+    personas: [P-008, P-004, P-002]
+    file: US-127-gui-capability-disabled-types.md

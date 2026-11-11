@@ -1,0 +1,60 @@
+# Media Workbench v2 — screen comp: Runs with live run-queue rail (conventional list + Instrument-Deck-derived rail, macOS light appearance)
+# Note: the rail borrows Instrument Deck's *queue rail idea only*. The prompt deliberately avoids
+# "instrument", "deck", "console" and "studio" wording — in v1 that vocabulary hijacked the render into a synthesiser.
+schema: "0.4"
+id: mw-screen-runs-rail
+type: image
+service: gemini
+model: gemini-3.1-flash-image
+quality: high
+prompt:
+  text: |
+    A straight-on screenshot of a macOS 14 Sonoma app window, light system appearance, SF Pro type, traffic lights, unified toolbar titled "Runs" with a segmented filter "All | Running | Failed" and a search field. The app is a media-generation workbench; this screen lists generation runs and shows the live job queue.
+
+    Left: the translucent source-list sidebar: "Requests 3", "Library", "Runs" (selected) with a small blue badge "2", "Styles", divider, "Settings".
+
+    Centre: a native table of past runs with small image thumbnails at row start. Columns: "Run", "Provider", "Attempts", "Grade", "When". Rows:
+    "pricing-hero · gemini-3.1-flash-image · 3/4 · 84 · now";
+    "og-card · grok-2-image · 2/2 · 91 · 4m";
+    "changelog-banner · qwen-image · 1/1 · 58 · 1h" (grade in a small red pill);
+    "onboarding-spot · gemini-3.1-flash-image · 3/3 · 88 · 2h";
+    "team-photo-bg · qwen-image · 0/2 · failed · 3h" (small red "failed" pill).
+    Grades sit in small pills, green when passed, red when failed, grey when ungraded. One row also shows a tiny override glyph next to its grade.
+
+    Right: a narrow vertical queue rail (about 300pt) titled "Queue", plain white rows separated by hairlines. Each job row: run name, provider, a thin horizontal progress bar, elapsed time, and a small circular "×" cancel button:
+    "pricing-hero · gemini · attempt 4/4 · 62% · 0:48";
+    "og-card ×2 · grok · 1/2 · 20% · 0:12";
+    "hero-alt · qwen-image · queued".
+    At the rail bottom a muted caption "Keeps running if window closes" and a small hint "⌘. cancel".
+
+    Plain, native list UI with live progress. Short legible labels and numbers only.
+  negative: >
+    garbled text, lorem ipsum, watermark, mobile frame, browser chrome, Windows UI,
+    perspective tilt, synthesizer/audio-hardware look, CAD tool, manuscript editor,
+    knobs, faders, sliders, VU meters, waveform, mixing console, LED displays, rack hardware,
+    dark mode, terminal window, emoji icons
+  style: "UI design screen comp, straight-on screenshot framing, no perspective, no camera tilt, crisp pixel-sharp interface"
+output:
+  formats:
+    - format: png
+      quality: 95
+  dimensions:
+    width: 2560
+    height: 1600
+    aspect_ratio: "16:10"
+eval:
+  pass_threshold: 0.7
+  criteria:
+    depicts_the_product:
+      weight: 0.4
+      description: "reads as a media-generation request/review/grading tool, specifically a history of generation runs with a live queue of in-flight image generations"
+    follows_spec:
+      weight: 0.35
+      description: "shows (1) a runs table with provider/model, attempts and gate-coloured grade pills; (2) a right-hand queue rail with per-job progress bars, elapsed time and cancel; (3) a queued job alongside running ones; (4) the source-list sidebar with Runs selected and a running-count badge"
+    macos_native:
+      weight: 0.25
+      description: "reads as a native macOS 14 light-appearance window with source list, table, toolbar filter and search"
+  reject_if:
+    - depicts a different product category (audio workstation, synthesiser, CAD tool, manuscript editor, web page)
+    - primary labels (Queue, run names, percentages) are unreadable or garbled
+tags: [screen-comp, macos, media-workbench, v2]
