@@ -55,9 +55,29 @@ pub fn link_active(genai_path: &Path, output_path: &Path) -> color_eyre::Result<
     Ok(())
 }
 
+/// Eval provenance for a sidecar: which attempt produced the artifact, whether
+/// it passed the rubric, and the full score (per-criterion values, judge
+/// identity/model/request id, observer model, probability distributions).
+pub struct EvalMeta<'a> {
+    pub attempt: Option<usize>,
+    pub verdict: Option<bool>,
+    pub score: Option<&'a crate::eval::EvalScore>,
+}
+
+impl<'a> EvalMeta<'a> {
+    pub fn from_score(attempt: usize, verdict: bool, score: &'a crate::eval::EvalScore) -> Self {
+        Self {
+            attempt: Some(attempt),
+            verdict: Some(verdict),
+            score: Some(score),
+        }
+    }
+}
+
 /// Write a metadata sidecar file next to a generated candidate.
 /// Path: same as candidate but with `.metadata.yaml` replacing the extension.
 // <REMOVED UUID HERE> write_metadata :: Write a metadata sidecar file next to a generated candidate.
+#[allow(clippy::too_many_arguments)]
 pub fn write_metadata(
     genai_path: &Path,
     service: &str,
@@ -67,6 +87,7 @@ pub fn write_metadata(
     eval_score: Option<f64>,
     eval_notes: Option<&str>,
     options: &std::collections::HashMap<String, serde_yaml::Value>,
+    eval_meta: Option<&EvalMeta<'_>>,
 ) {
     let meta_path = genai_path.with_extension("metadata.yaml");
     let mut content = String::new();
@@ -88,6 +109,9 @@ pub fn write_metadata(
             "eval_notes: \"{}\"\n",
             crate::text::truncate(&escaped, 500)
         ));
+    }
+    if let Some(meta) = eval_meta {
+        content.push_str(&render_eval_block(meta));
     }
     if !options.is_empty() {
         content.push_str("provider_options:\n");
@@ -115,6 +139,59 @@ pub fn write_metadata(
         }
     }
     let _ = std::fs::write(&meta_path, content);
+}
+
+/// Render the structured `eval:` block: attempt, verdict, per-criterion scores,
+/// judge identity (backend/model/request id), observer model when the judge saw
+/// an observe pass, and per-question probability distributions. Keys are sorted
+/// for byte-stable sidecars.
+fn render_eval_block(meta: &EvalMeta<'_>) -> String {
+    let mut out = String::from("eval:\n");
+    if let Some(a) = meta.attempt {
+        out.push_str(&format!("  attempt: {}\n", a));
+    }
+    if let Some(v) = meta.verdict {
+        out.push_str(&format!("  verdict: {}\n", if v { "pass" } else { "fail" }));
+    }
+    if let Some(s) = meta.score {
+        out.push_str(&format!("  weighted: {:.4}\n", s.weighted));
+        if !s.per_criterion.is_empty() {
+            out.push_str("  per_criterion:\n");
+            let ordered: BTreeMap<&String, &f64> = s.per_criterion.iter().collect();
+            for (k, v) in ordered {
+                out.push_str(&format!("    {}: {:.4}\n", k, v));
+            }
+        }
+        if !s.reject_hits.is_empty() {
+            out.push_str("  reject_hits:\n");
+            for h in &s.reject_hits {
+                out.push_str(&format!("    - {}\n", h));
+            }
+        }
+        if let Some(j) = &s.judge {
+            out.push_str("  judge:\n");
+            out.push_str(&format!("    backend: {}\n", j.backend));
+            out.push_str(&format!("    model: {}\n", j.model));
+            if let Some(rid) = &j.request_id {
+                out.push_str(&format!("    request_id: {}\n", rid));
+            }
+            if let Some(om) = &j.observer_model {
+                out.push_str(&format!("    observer_model: {}\n", om));
+            }
+            if !j.probabilities.is_empty() {
+                out.push_str("    probabilities:\n");
+                for (k, probs) in &j.probabilities {
+                    let rendered = probs
+                        .iter()
+                        .map(|p| format!("{:.4}", p))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    out.push_str(&format!("      {}: [{}]\n", k, rendered));
+                }
+            }
+        }
+    }
+    out
 }
 
 fn rand_byte() -> u8 {
@@ -151,6 +228,7 @@ mod tests {
             None,
             None,
             options,
+            None,
         );
         std::fs::read_to_string(asset.with_extension("metadata.yaml")).unwrap()
     }
@@ -240,6 +318,104 @@ mod tests {
         for (k, v) in &options {
             assert!(sidecar.contains(&format!("  {k}: {v:?}\n")));
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The `eval:` block must carry judge provenance — per-criterion scores,
+    /// weighted + verdict, backend/model/request id, observer model when the
+    /// judge saw an observe pass, and the probability distributions.
+    #[test]
+    fn sidecar_records_judge_metadata() {
+        let dir = scratch_dir("judge-meta");
+
+        let mut per = HashMap::new();
+        per.insert("relevance".to_string(), 8.0 / 9.0);
+        per.insert("technical".to_string(), 7.0 / 9.0);
+        let detail = crate::judge::JudgeRunDetail {
+            backend: "alibaba".to_string(),
+            model: "decision-model-preview".to_string(),
+            request_id: Some("req-123".to_string()),
+            observer_model: Some("qwen3.8-flash".to_string()),
+            probabilities: [
+                ("criterion:relevance".to_string(), vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]),
+                ("reject:00".to_string(), vec![0.95, 0.05]),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let score = crate::eval::EvalScore {
+            weighted: 0.9167,
+            per_criterion: per,
+            reject_hits: vec![],
+            notes: "decision judge".to_string(),
+            judge: Some(detail),
+        };
+        let meta = EvalMeta::from_score(2, true, &score);
+
+        let options: HashMap<String, serde_yaml::Value> = HashMap::new();
+        let asset = dir.join("asset.png");
+        write_metadata(
+            &asset,
+            "qwen-image",
+            "qwen-image-plus",
+            "prompt text",
+            None,
+            Some(score.weighted),
+            Some(&score.notes),
+            &options,
+            Some(&meta),
+        );
+        let sidecar = std::fs::read_to_string(asset.with_extension("metadata.yaml")).unwrap();
+
+        for expected in [
+            "eval:",
+            "  attempt: 2",
+            "  verdict: pass",
+            "  weighted: 0.9167",
+            "  per_criterion:",
+            "    relevance: 0.8889",
+            "    technical: 0.7778",
+            "  judge:",
+            "    backend: alibaba",
+            "    model: decision-model-preview",
+            "    request_id: req-123",
+            "    observer_model: qwen3.8-flash",
+            "    probabilities:",
+            "      criterion:relevance: [0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 1.0000, 0.0000]",
+            "      reject:00: [0.9500, 0.0500]",
+        ] {
+            assert!(
+                sidecar.contains(expected),
+                "sidecar missing {expected:?}\n---\n{sidecar}\n---"
+            );
+        }
+        assert!(sidecar.contains("eval_notes: \"decision judge\""));
+
+        // A score without judge detail must not invent judge fields.
+        let bare = crate::eval::EvalScore {
+            weighted: 0.5,
+            per_criterion: HashMap::new(),
+            reject_hits: vec![],
+            notes: "legacy".to_string(),
+            judge: None,
+        };
+        let meta2 = EvalMeta::from_score(1, false, &bare);
+        let asset2 = dir.join("asset2.png");
+        write_metadata(
+            &asset2,
+            "qwen-image",
+            "m",
+            "p",
+            None,
+            Some(0.5),
+            Some("legacy"),
+            &options,
+            Some(&meta2),
+        );
+        let sidecar2 = std::fs::read_to_string(asset2.with_extension("metadata.yaml")).unwrap();
+        assert!(sidecar2.contains("  verdict: fail"));
+        assert!(!sidecar2.contains("judge:"), "no judge block when absent: {sidecar2}");
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

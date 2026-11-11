@@ -5,6 +5,18 @@ Tags follow `utilities-agent-media-tool/<milestone>`; pre-import milestones (m1â
 are tagged on the original standalone-repo lineage preserved by the subtree squash.
 
 ## [Unreleased]
+### Added
+- Rubric-gated generation (decision-judge phase 2): prep and eval ride the
+  qwen3.8-flash inference profile (`inference:` config section / env / dc
+  chain; Groq demoted to last-resort fallback), image and video outputs are
+  observed (factual per-criterion description by a vision model) before the
+  System One decision judge scores them, `eval.judge:` selects
+  decision vs the legacy text grader, and metadata sidecars record attempt,
+  verdict, per-criterion scores, judge/observer identity and probability
+  distributions. Best-of-N no longer scores against an empty eval (which
+  pinned candidate 1 at 0.0): candidates score against the prompt's own
+  `eval:` block or the asset-type default. (2026-11-11)
+
 ### Fixed
 - A prompt declaring `format: png` no longer ships JPEG bytes in a `.png` file. The gemini
   image provider returns JPEG whatever the prompt declares; the tool wrote those bytes to the

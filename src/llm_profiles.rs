@@ -365,7 +365,16 @@ fn client() -> Result<reqwest::Client> {
 
 fn auth(request: reqwest::RequestBuilder, profile: &Profile) -> Result<reqwest::RequestBuilder> {
     let key = profile.api_key()?;
-    Ok(match (profile.provider.as_str(), key) {
+    auth_with(request, profile.provider.as_str(), key.as_deref())
+}
+
+/// Header selection by provider for an already-resolved credential.
+fn auth_with(
+    request: reqwest::RequestBuilder,
+    provider: &str,
+    key: Option<&str>,
+) -> Result<reqwest::RequestBuilder> {
+    Ok(match (provider, key) {
         ("anthropic", Some(key)) => request
             .header("x-api-key", key)
             .header("anthropic-version", "2023-06-01"),
@@ -436,6 +445,22 @@ pub async fn complete(
     options: &HashMap<String, serde_yaml::Value>,
     attachments: &[LoadedAttachment],
 ) -> Result<String> {
+    let key = profile.api_key()?;
+    complete_with_key(profile, key.as_deref(), system, user, model, options, attachments).await
+}
+
+/// [`complete`] with a caller-resolved credential — lets the eval/prep paths
+/// bring a key from the `secrets.rs` chain (env -> dc store) without touching
+/// environment variables or profile files. Same wire behavior.
+pub async fn complete_with_key(
+    profile: &Profile,
+    key: Option<&str>,
+    system: &str,
+    user: &str,
+    model: &str,
+    options: &HashMap<String, serde_yaml::Value>,
+    attachments: &[LoadedAttachment],
+) -> Result<String> {
     profile.validate()?;
     let max_tokens = options
         .get("max_tokens")
@@ -493,9 +518,10 @@ pub async fn complete(
             body["temperature"] = json!(t);
         }
     }
-    let data = response_json(auth(
+    let data = response_json(auth_with(
         client()?.post(profile.endpoint(suffix)).json(&body),
-        profile,
+        profile.provider.as_str(),
+        key,
     )?)
     .await?;
     let truncated = if profile.provider == "anthropic" {

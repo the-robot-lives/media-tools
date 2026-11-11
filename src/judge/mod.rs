@@ -7,8 +7,10 @@
 //! posts one System One request per output and strictly validates the returned
 //! distributions before they are remapped onto the prompt's eval rubric.
 //!
-//! Phase 1 scope: text-like outputs only (svg/html/txt/md/code). Image, video
-//! and audio need an observe -> describe step that lands in Phase 2.
+//! Text-like outputs go to the judge directly. Raster images and video are
+//! observed first: a vision model (`crate::inference::Observer`) writes a
+//! factual per-criterion description and the judge scores that description.
+//! Audio stays un-judgeable (structural scoring handles it).
 
 pub mod system_one;
 
@@ -20,7 +22,8 @@ use std::time::Duration;
 use color_eyre::eyre::{bail, eyre, Context, Result};
 use serde_json::{json, Value};
 
-use crate::eval::{build_score, EvalScore};
+use crate::eval::build_score;
+pub use crate::eval::EvalScore;
 use crate::schema::EvalSection;
 use crate::secrets::{resolve_with as resolve_secret_with, DcOutput, Secret, SecretSource, SecretSpec};
 pub use system_one::{
@@ -341,7 +344,7 @@ pub fn build_rubric(eval: &EvalSection) -> Rubric {
     rubric
 }
 
-fn score_level_label(index: usize, description: &str, fail_signals: &[String]) -> String {
+pub(crate) fn score_level_label(index: usize, description: &str, fail_signals: &[String]) -> String {
     match index {
         0 => {
             let mut label = format!("0 — total failure: {description}");
@@ -416,6 +419,7 @@ pub fn score_result(
         per_criterion: HashMap::new(),
         reject_hits,
         notes,
+        judge: None,
     })
 }
 
@@ -447,7 +451,8 @@ pub fn output_kind(extension: &str) -> OutputKind {
     }
 }
 
-/// Raised so the CLI shell can map image/video/audio grading to exit code 2.
+/// Raised so the CLI shell can map audio grading to exit code 2. Images and
+/// video are observed then judged (Phase 2); audio has no observation path.
 #[derive(Debug)]
 pub struct ObserveRequired(pub &'static str);
 
@@ -455,13 +460,103 @@ impl std::fmt::Display for ObserveRequired {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{} outputs need an observe step — observe step lands in Phase 2",
+            "{} outputs cannot be judged (no observation path; structural scoring handles them)",
             self.0
         )
     }
 }
 
 impl std::error::Error for ObserveRequired {}
+
+/// Everything one judging round produced, shared by the CLI verdict renderer
+/// and the eval-gated pipeline path.
+pub struct JudgeOutcome {
+    pub score: EvalScore,
+    pub detail: JudgeRunDetail,
+    pub result: JudgeResult,
+    pub rubric: Rubric,
+}
+
+/// Judge one generated output against `eval`. Text-like outputs are sent to
+/// the decision model directly; images and video are observed first (the
+/// observer writes a factual per-criterion description, which becomes the
+/// judged text). Audio must be gated by the caller.
+#[allow(clippy::too_many_arguments)]
+pub async fn judge_output(
+    cfg: &JudgeConfig,
+    observer: Option<&crate::inference::Observer>,
+    prompt_text: &str,
+    asset_type_label: &str,
+    output_format: &str,
+    kind: OutputKind,
+    output_path: &Path,
+    eval: &EvalSection,
+    verbose: bool,
+) -> Result<JudgeOutcome> {
+    let rubric = build_rubric(eval);
+    let mut state = json!({
+        "prompt": prompt_text,
+        "asset_type": asset_type_label,
+        "output_format": output_format,
+    });
+    let mut observer_model: Option<String> = None;
+    match kind {
+        OutputKind::Text => {
+            let content = std::fs::read_to_string(output_path)
+                .wrap_err_with(|| format!("cannot read output file {}", output_path.display()))?;
+            if content.trim().is_empty() {
+                bail!("output file {} is empty", output_path.display());
+            }
+            state["output"] = json!(content);
+        }
+        OutputKind::Image | OutputKind::Video => {
+            let observer = observer.ok_or_else(|| {
+                eyre!(
+                    "{} output judging needs an inference profile for the vision observer",
+                    if kind == OutputKind::Image { "image" } else { "video" }
+                )
+            })?;
+            let attachments = match kind {
+                OutputKind::Image => vec![crate::inference::load_image_attachment(output_path)?],
+                OutputKind::Video => {
+                    crate::eval::extract_frames(output_path, verbose)
+                        .await
+                        .map(|frames| {
+                            frames
+                                .into_iter()
+                                .map(|f| f.attachment)
+                                .collect::<Vec<_>>()
+                        })
+                        .ok_or_else(|| {
+                            eyre!("no frames extracted from {} (ffmpeg missing?)", output_path.display())
+                        })?
+                }
+                _ => unreachable!("gated above"),
+            };
+            let observed = observer
+                .describe(&crate::inference::criterion_brief(eval), &attachments, verbose)
+                .await?;
+            state["observations"] = json!(observed.description);
+            state["observed_by"] = json!(observed.model);
+            observer_model = Some(observed.model);
+        }
+        OutputKind::Audio => bail!("audio cannot be judged (no observation path)"),
+        OutputKind::Unknown => {
+            bail!("output extension '.{output_format}' is not judgeable")
+        }
+    }
+
+    let result = classify(cfg, &state, &rubric.questions).await?;
+    let score = score_result(&result, &rubric, eval, cfg.backend.as_str());
+    let mut detail = JudgeRunDetail::from_result(cfg.backend.as_str(), &result, &rubric);
+    detail.observer_model = observer_model;
+    Ok(JudgeOutcome {
+        score,
+        detail,
+        result,
+        rubric,
+    })
+}
 
 /// One graded criterion row for rendering.
 #[derive(Debug, Clone)]
@@ -476,6 +571,41 @@ pub struct CriterionRow {
     pub wire_expected_index: Option<f64>,
     pub rounded: bool,
     pub provider_confidence: Option<f64>,
+}
+
+/// Per-criterion probabilities plus judge identity, carried on
+/// [`crate::eval::EvalScore`] so metadata sidecars can record how the grade
+/// was produced (backend, model, request id, observing model).
+#[derive(Debug, Clone, Default)]
+pub struct JudgeRunDetail {
+    pub backend: String,
+    pub model: String,
+    pub request_id: Option<String>,
+    /// Set when an observe -> decide pass preceded the judge call.
+    pub observer_model: Option<String>,
+    /// wire question id -> ordered level probabilities.
+    pub probabilities: BTreeMap<String, Vec<f64>>,
+}
+
+impl JudgeRunDetail {
+    /// Identity + probability distributions from one judge round trip.
+    pub fn from_result(backend: &str, result: &JudgeResult, rubric: &Rubric) -> Self {
+        let mut probabilities = BTreeMap::new();
+        for answer in &result.answers {
+            if rubric.criteria.contains_key(&answer.question_id)
+                && !answer.distribution.is_empty()
+            {
+                probabilities.insert(answer.question_id.clone(), answer.distribution.clone());
+            }
+        }
+        JudgeRunDetail {
+            backend: backend.to_string(),
+            model: result.model.clone(),
+            request_id: result.request_id.clone(),
+            observer_model: None,
+            probabilities,
+        }
+    }
 }
 
 /// The full judged verdict for a single output file.
@@ -567,8 +697,9 @@ impl JudgeVerdict {
     }
 }
 
-/// Grade one generated output file against its prompt's eval rubric.
-/// Text-like outputs only; image/video/audio raise [`ObserveRequired`].
+/// Grade one generated output file against its prompt's eval rubric (or the
+/// per-criterion default rubric when the prompt carries no eval block).
+/// Text goes to the judge directly; image/video are observed first.
 pub async fn run_cli(
     prompt_path: &Path,
     output_path: &Path,
@@ -581,31 +712,21 @@ pub async fn run_cli(
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("");
-    match output_kind(extension) {
-        OutputKind::Text => {}
-        OutputKind::Image => return Err(ObserveRequired("image").into()),
-        OutputKind::Video => return Err(ObserveRequired("video").into()),
-        OutputKind::Audio => return Err(ObserveRequired("audio").into()),
-        OutputKind::Unknown => {
-            return Err(eyre!(
-                "output extension '.{extension}' is not judgeable text; the observe step lands in Phase 2"
-            ))
-        }
+    let kind = output_kind(extension);
+    if kind == OutputKind::Audio {
+        return Err(ObserveRequired("audio").into());
     }
-    let content = std::fs::read_to_string(output_path)
-        .wrap_err_with(|| format!("cannot read output file {}", output_path.display()))?;
-    if content.trim().is_empty() {
-        bail!("output file {} is empty", output_path.display());
+    if kind == OutputKind::Unknown {
+        return Err(eyre!(
+            "output extension '.{extension}' is not judgeable; expected text, image or video"
+        ));
     }
-    let eval = parsed.payload.eval.clone().unwrap_or_default();
-    if eval.criteria.is_empty() {
-        bail!(
-            "{} has no eval criteria to judge against",
-            prompt_path.display()
-        );
-    }
+    let eval = parsed
+        .payload
+        .eval
+        .clone()
+        .unwrap_or_else(crate::eval::default_eval_for_type);
 
-    let rubric = build_rubric(&eval);
     let mut prompt_text = String::new();
     if let Some(system) = parsed.payload.prompt.system.as_deref().map(str::trim) {
         if !system.is_empty() {
@@ -614,24 +735,45 @@ pub async fn run_cli(
         }
     }
     prompt_text.push_str(parsed.payload.prompt.text.trim());
-    let state = json!({
-        "prompt": prompt_text,
-        "output": content,
-        "asset_type": format!("{:?}", parsed.meta.asset_type),
-        "output_format": extension,
-    });
 
-    let config = crate::provider_config::loaded().map(|loaded| &loaded.judge);
+    let loaded = crate::provider_config::loaded();
+    let config = loaded.map(|l| &l.judge);
     let cfg = JudgeConfig::resolve(backend_override, model_override, config)?;
-    let result = classify(&cfg, &state, &rubric.questions).await?;
+    let observer = match kind {
+        OutputKind::Text => None,
+        _ => {
+            let inference_cfg = crate::inference::InferenceConfig::resolve(
+                loaded.map(|l| &l.inference),
+            )
+            .map_err(|e| {
+                eyre!(
+                    "observing a {extension} output needs an inference profile (observer vision model): {e:#}"
+                )
+            })?;
+            Some(crate::inference::Observer::new(inference_cfg))
+        }
+    };
 
-    let score = score_result(&result, &rubric, &eval, cfg.backend.as_str());
+    let outcome = judge_output(
+        &cfg,
+        observer.as_ref(),
+        &prompt_text,
+        &format!("{:?}", parsed.meta.asset_type),
+        extension,
+        kind,
+        output_path,
+        &eval,
+        false,
+    )
+    .await?;
+    let score = outcome.score;
     let threshold = eval.effective_pass_threshold();
     let passes = score.passes(&eval);
 
     let mut criteria = Vec::new();
-    for (question_id, name) in &rubric.criteria {
-        let Some(answer) = result
+    for (question_id, name) in &outcome.rubric.criteria {
+        let Some(answer) = outcome
+            .result
             .answers
             .iter()
             .find(|a| &a.question_id == question_id)
@@ -675,10 +817,10 @@ pub async fn run_cli(
 
     Ok(JudgeVerdict {
         backend: cfg.backend.as_str(),
-        model: result.model.clone(),
-        request_id: result.request_id.clone(),
-        latency_ms: result.latency_ms,
-        usage: result.usage.clone(),
+        model: outcome.result.model.clone(),
+        request_id: outcome.result.request_id.clone(),
+        latency_ms: outcome.result.latency_ms,
+        usage: outcome.result.usage.clone(),
         weighted: score.weighted,
         threshold,
         passes,
@@ -727,6 +869,7 @@ mod tests {
             reject_if: vec!["watermark".into()],
             mode: None,
             visual: None,
+            judge: None,
         }
     }
 

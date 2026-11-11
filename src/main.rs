@@ -239,13 +239,13 @@ async fn main() -> color_eyre::Result<()> {
                         .downcast_ref::<media_tool::judge::ObserveRequired>()
                         .is_some() =>
                 {
-                    // Image/video/audio grading needs the Phase 2 observe step.
+                    // Audio has no observation path (image/video are observed then judged).
                     let kind = err
                         .downcast_ref::<media_tool::judge::ObserveRequired>()
                         .map(|o| o.0)
                         .unwrap_or("this output kind");
                     ui::fail_msg(&format!(
-                        "judge: {kind} outputs need an observe step — observe step lands in Phase 2"
+                        "judge: {kind} outputs cannot be judged (no observation path — image/video are observed then decided; audio is unsupported)"
                     ));
                     std::process::exit(2);
                 }
