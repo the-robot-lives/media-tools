@@ -1,6 +1,8 @@
 name: Nightly
 
-# Slow tier + release-cache warmer. Releases to main are weeks apart, so buildx
+# Slow tier + coverage gate + release-cache warmer. The PR fast lane (ci.yml)
+# runs plain `cargo test`; the llvm-cov line-coverage gate (25% floor) moved
+# here. Releases to main are weeks apart, so buildx
 # cache is evicted between them. Schedules run on the default branch (develop),
 # whose caches main and PR runs can restore, so this keeps release builds warm.
 # Live provider tests (tests/live_qwen_routes.rs) cost API credits and stay manual.
@@ -25,6 +27,31 @@ jobs:
         run: |
           cargo test --locked
           cargo test --locked --test slow_provider_http -- --ignored
+
+  # Coverage tier re-tiered off the PR lane: the line-coverage floor gate runs
+  # here (the exact command the ci.yml rust-test job used to run).
+  rust-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-coverage
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      # Gate = floor(acceptance line coverage) - 5 (measured 30.15% on 2026-10-07).
+      - name: Coverage gate
+        run: |
+          cargo llvm-cov --locked --lcov --output-path lcov.info --fail-under-lines 25
+          cargo llvm-cov report --summary-only
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-coverage
+          path: lcov.info
+          if-no-files-found: ignore
 
   warm-docker-cache:
     runs-on: ubuntu-latest

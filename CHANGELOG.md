@@ -17,6 +17,13 @@ are tagged on the original standalone-repo lineage preserved by the subtree squa
   pinned candidate 1 at 0.0): candidates score against the prompt's own
   `eval:` block or the asset-type default. (#48) (2026-11-11, on develop)
 
+### Changed
+- CI fast-test-lane: PR/develop `rust-test` runs plain `cargo test --locked` — no coverage
+  instrumentation (llvm-tools-preview + cargo-llvm-cov setup dropped from the job); the
+  line-coverage gate (`cargo llvm-cov --fail-under-lines 25`) moved to `nightly.yml` as a
+  new `rust-coverage` job (same schedule + stage pushes). `web-test` (already no-cover),
+  docker `smoke`, and the main-only release jobs are unchanged. (2026-11-11, on develop)
+
 ### Fixed
 - A prompt declaring `format: png` no longer ships JPEG bytes in a `.png` file. The gemini
   image provider returns JPEG whatever the prompt declares; the tool wrote those bytes to the
