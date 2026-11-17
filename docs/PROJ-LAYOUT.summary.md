@@ -9,6 +9,7 @@ media-tool/
 │   ├── schema.rs                   # .media.prompt YAML parsing
 │   ├── structural.rs               # Structural format detection
 │   ├── provider_config.rs          # Runtime config loader (media-tool.yaml)
+│   ├── preferences.rs              # CSS-style preference cascade + snippets
 │   ├── pipeline.rs                 # Generation pipeline
 │   ├── dag.rs                      # Dependency DAG resolution
 │   ├── attachments.rs              # File attachment handling
@@ -25,8 +26,9 @@ media-tool/
 │   ├── term_layer.rs               # CLI terminal subscriber for telemetry
 │   ├── ui.rs                       # Terminal UI
 │   ├── providers/                  # 16 provider implementations
-│   ├── renderers/                  # 4 renderer implementations
+│   ├── renderers/                  # 5 renderer implementations (incl. vhs)
 │   └── test_lab/                   # Local eval/test-lab web server
+├── tests/                          # Rust integration test targets
 ├── bin/                            # Bash wrapper + eval port-forward helper
 ├── lib/                            # Legacy Python engine
 ├── web/                            # Phoenix + Hologram landing site (app, config, priv, test)
@@ -37,7 +39,7 @@ media-tool/
 ├── skill/content-media-engine/     # Claude Code skill definition (assets, references/fim)
 ├── scripts/                        # Utility scripts (live-eval-report.sh)
 ├── project-management/             # Personas (8) and user stories (100+)
-├── docs/                           # Layout, arch, schema, FAQ, howto, provider, quality/eval, design docs
+├── docs/                           # Layout, arch, schema, threat model, FAQ, howto, provider, quality/eval, design docs
 ├── .github/workflows/ci.yml        # CI
 ├── Cargo.toml                      # Rust package config
 ├── Makefile                        # Build targets
@@ -46,6 +48,7 @@ media-tool/
 ├── CLAUDE.md                       # Claude Code agent guidance
 ├── AGENT.md / AGENTS.md            # Multi-agent (Grok Build) guidance
 ├── CHANGELOG.md
+├── DECISIONLOG.md                  # Architectural decisions + reversal triggers
 ├── LICENSE
 └── README.md                       # Full documentation
 ```

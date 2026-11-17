@@ -194,10 +194,11 @@ fn route_defaults_follow_attachments_and_overrides() {
 /// for it, so the route maps it onto the text2image family.
 #[test]
 fn text2image_model_maps_the_multimodal_default() {
-    assert_eq!(text2image_model("qwen-image-3.0"), "qwen-image");
-    assert_eq!(text2image_model("default"), "qwen-image");
-    assert_eq!(text2image_model(""), "qwen-image");
-    assert_eq!(text2image_model("qwen-image-plus"), "qwen-image-plus");
+    assert_eq!(text2image_model("qwen-image-3.0"), "wan2.2-t2i-flash");
+    assert_eq!(text2image_model("qwen-image"), "wan2.2-t2i-flash");
+    assert_eq!(text2image_model("qwen-image-plus"), "wan2.2-t2i-flash");
+    assert_eq!(text2image_model("default"), "wan2.2-t2i-flash");
+    assert_eq!(text2image_model(""), "wan2.2-t2i-flash");
     assert_eq!(text2image_model("wan2.2-t2i-flash"), "wan2.2-t2i-flash");
 }
 

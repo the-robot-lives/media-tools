@@ -1,0 +1,53 @@
+# Media Workbench v2 — screen comp S1: Styles three-pane, Palette facet (conventional, macOS light appearance)
+schema: "0.4"
+id: mw-screen-styles
+type: image
+service: gemini
+model: gemini-3.1-flash-image
+quality: high
+prompt:
+  text: |
+    A straight-on screenshot of a macOS 14 Sonoma app window, light system appearance, SF Pro type, traffic lights, unified toolbar titled "Styles". The app is a media-generation workbench; this screen edits the layered house style that both instructs the image generator and grades its output.
+
+    Far left: the translucent source-list sidebar: "Requests 3", "Library", "Runs 2", "Styles" (selected), divider, "Settings".
+
+    Pane 1, "Layers": a vertical stack of four rows top to bottom joined by a thin line, each with a small toggle switch: "House" (caption "global"), "Project · codefre.sh" (caption "inherits House", a small dot showing unsaved), "Collection · landing" (caption "inherits Project"), "Prompt · pricing-hero". "Project" is selected.
+
+    Pane 2, "Facets": a plain list: "Palette" (selected), "Typography", "Copy voice", "Element construction", "Imagery rules", "Rubric", "Snippets".
+
+    Pane 3, the Palette editor (widest pane):
+    - A row of five large colour swatches, each with a role label and hex below: "canvas #0F1115", "ink #F2F0EB", "accent #FF6B4A", "teal #2EC4B6", "muted #6B7280".
+    - A compact table titled "Contrast pairs" with small sample text chips and ratios: "ink / canvas 16.6:1 AAA", "teal / canvas 8.7:1 AAA", "accent / canvas 6.7:1 AA", "muted / canvas 3.9:1 Large only" (orange), "ink / accent 2.5:1 Fail" (red).
+    - Two rows of small flag chips: "Must use: accent" and "Avoid: purple gradient".
+    - A quiet footer line: "Compiles to 3 rubric criteria".
+
+    Native, tidy, left-aligned, one blue primary "Save" in the toolbar. Short legible labels and numbers only.
+  negative: >
+    garbled text, lorem ipsum, watermark, mobile frame, browser chrome, Windows UI,
+    perspective tilt, synthesizer/audio-hardware look, CAD tool, manuscript editor,
+    dark mode, colour wheel, gradient, Photoshop-style tool palette, emoji icons
+  style: "UI design screen comp, straight-on screenshot framing, no perspective, no camera tilt, crisp pixel-sharp interface"
+output:
+  formats:
+    - format: png
+      quality: 95
+  dimensions:
+    width: 2560
+    height: 1600
+    aspect_ratio: "16:10"
+eval:
+  pass_threshold: 0.7
+  criteria:
+    depicts_the_product:
+      weight: 0.4
+      description: "reads as a media-generation request/review/grading tool, specifically editing a layered brand style (house to prompt) that feeds image generation and grading"
+    follows_spec:
+      weight: 0.35
+      description: "shows (1) three panes: layer stack / facet list / facet editor; (2) a layer stack ordered House > Project > Collection > Prompt with enable toggles and inherits captions; (3) a palette editor with role-labelled swatches; (4) a contrast-pair table with WCAG ratios including at least one failing pair"
+    macos_native:
+      weight: 0.25
+      description: "reads as a native macOS 14 light-appearance window with source list, split panes, SF type and system switches"
+  reject_if:
+    - depicts a different product category (paint app, CAD tool, manuscript editor, audio hardware, web page)
+    - primary labels (Layers, Palette, contrast ratios) are unreadable or garbled
+tags: [screen-comp, macos, media-workbench, v2]

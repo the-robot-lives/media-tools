@@ -14,7 +14,8 @@ All paths are relative to this file's location (`skill/content-media-engine/refe
 | drawio | diagram | `fim/solution/drawio-xml.md` | `fim/use-case/diagram-generation.md` | .drawio |
 | svg | image | (multiple -- see design-systems use-case) | `fim/use-case/design-systems.md` | .svg |
 | html | page | (inline CSS/JS -- see prototyping use-case) | `fim/use-case/prototyping.md` | .html |
-| tsx | component | (React patterns -- see prototyping use-case) | `fim/use-case/prototyping.md` | .tsx |
+| ts | component | [Default Lit component template](prompt-templates/lit-component.md) | `fim/use-case/prototyping.md` | .ts |
+| tsx | component / react-page | (Explicit React request -- see prototyping use-case) | `fim/use-case/prototyping.md` | .tsx |
 | latex | document | `fim/solution/latex.md` | `fim/use-case/document-processing.md` | .tex |
 | typst | document | `fim/solution/typst.md` | `fim/use-case/document-processing.md` | .typ |
 | abc | music | `fim/solution/abcjs.md` | `fim/use-case/music-notation.md` | .abc |

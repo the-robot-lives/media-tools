@@ -1,3 +1,4 @@
+// 〚📁:502629f1-a7eb-5711-989f-a0ab633220b4〛 media-tool library surface :: Engine shared by the CLI, test lab and macOS front-ends; publishes telemetry, never prints.
 //! media-tool library surface.
 //!
 //! Everything the `generate-media-prompt` CLI does is implemented here so that other
@@ -20,16 +21,22 @@ pub mod dag;
 pub mod eval;
 pub mod fim;
 pub mod imagefmt;
+pub mod inference;
+pub mod judge;
+pub mod llm_profiles;
 pub mod orchestrator;
 pub mod output;
 pub mod pipeline;
 pub mod postprocess;
+pub mod preferences;
 pub mod prep;
 pub mod provider_config;
 pub mod providers;
 pub mod refine;
+pub mod review;
 pub mod renderers;
 pub mod schema;
+pub mod secrets;
 pub mod structural;
 pub mod telemetry;
 pub mod text;
@@ -43,4 +50,5 @@ pub use orchestrator::{
     ResolvedInputs,
 };
 pub use pipeline::PipelineConfig;
+pub use preferences::{resolve as resolve_preferences, PreferenceSet, PromptFacts, Resolution};
 pub use schema::{parse_prompt_file, ParsedPrompt, Quality};

@@ -5,12 +5,18 @@
 //! batches, and running the generation pipeline. None of them touch a terminal — where the
 //! CLI used to print inline, the function either returns the information ([`ResolvedInputs`]'s
 //! issue list) or invokes a caller-supplied callback ([`load_prompts`]).
+//!
+//! The one exception is [`explain_prompt`], which is the terminal rendering of
+//! [`explain`]; front-ends without a terminal call [`explain`] and render the
+//! returned [`Explanation`] themselves.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::pipeline::{self, PipelineConfig};
+use crate::preferences;
 use crate::schema::{parse_prompt_file, ParsedPrompt, Quality};
+use crate::telemetry as tel;
 
 /// A non-fatal problem encountered while resolving CLI-style inputs into prompt files.
 ///
@@ -310,4 +316,116 @@ impl DisjointSet {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// `explain` — render the preference cascade for one prompt (design §4.3)
+// ---------------------------------------------------------------------------
+
+/// Everything `explain` needs about one prompt: the facts selectors matched
+/// against, the loaded rule set, and the full provenance of each field.
+///
+/// Returned rather than printed so the GUI can render the same trace as a
+/// provenance popover; [`explain_prompt`] is the terminal rendering of it.
+#[derive(Debug, Clone)]
+pub struct Explanation {
+    pub path: PathBuf,
+    pub facts: preferences::PromptFacts,
+    pub resolution: preferences::Resolution,
+    /// Snippet names that resolved but are not defined under `snippets:`.
+    pub missing_snippets: Vec<String>,
+    /// Config selectors that failed to parse and were skipped.
+    pub errors: Vec<preferences::SelectorError>,
+}
+
+/// Resolve the cascade for a single prompt file without generating anything.
+///
+/// Pure with respect to the prompt: nothing is mutated and no API is called.
+// ⟦𓉦𓈬𓅷𓏃⟧ explain :: resolve the preference cascade for one prompt file
+pub fn explain(path: &Path, config: &PipelineConfig) -> color_eyre::Result<Explanation> {
+    let prompt = parse_prompt_file(path)?;
+    let prefs = preferences::PreferenceSet::from_config(crate::provider_config::loaded());
+    let facts = preferences::PromptFacts::from_prompt(&prompt, config.quality_override);
+    let file = preferences::file_overrides(&prompt);
+    let cli = pipeline::cli_overrides(config);
+    let resolution = preferences::resolve(&prefs, &facts, &file, &cli);
+    let missing_snippets = resolution
+        .snippets()
+        .map(|names| prefs.compose(names).1)
+        .unwrap_or_default();
+    Ok(Explanation {
+        path: prompt.meta.path.clone(),
+        facts,
+        resolution,
+        missing_snippets,
+        errors: prefs.errors.clone(),
+    })
+}
+
+/// Print an [`Explanation`] through the telemetry facade.
+///
+/// Library code never touches the terminal directly, so every line here is a
+/// `media_tool::ui` event: the preamble reuses the existing `plan_detail` kind
+/// and the provenance block rides `raw` (pre-formatted, printed verbatim), the
+/// same channel `provider_config` already uses for its warnings. A GUI ignores
+/// all of it and renders the returned [`Explanation`] instead.
+// ⟦𓆊𓐁𓀉𓍒⟧ explain_prompt :: resolve and print the cascade for one prompt file
+pub fn explain_prompt(path: &Path, config: &PipelineConfig) -> color_eyre::Result<()> {
+    let ex = explain(path, config)?;
+
+    tel::step(&format!("Preference cascade for {}", ex.path.display()));
+    tel::plan_detail("id", &ex.facts.id);
+    tel::plan_detail("type", &ex.facts.type_name);
+    let tags = if ex.facts.tags.is_empty() {
+        "\u{2014}".to_string()
+    } else {
+        ex.facts.tags.join(", ")
+    };
+    tel::plan_detail("tags", &tags);
+    tel::plan_detail("formats", &ex.facts.formats.join(", "));
+    tel::plan_detail("quality", &format!("{} (pre-cascade)", ex.facts.quality));
+
+    for err in &ex.errors {
+        tel::warn_msg(&format!(
+            "ignoring preference `{}` \u{2014} {}",
+            err.selector, err.message
+        ));
+    }
+
+    for field in preferences::Field::ALL {
+        let Some(trace) = ex.resolution.trace(field) else {
+            continue;
+        };
+        tel::blank();
+        match trace.winning() {
+            Some(c) => tel::raw(&format!("  {}: {}", field.as_str(), c.value.display())),
+            None => tel::raw(&format!("  {}: (unset)", field.as_str())),
+        }
+        if trace.candidates.is_empty() {
+            tel::raw("      (no rule, file field or flag set this)");
+            continue;
+        }
+        for (i, c) in trace.candidates.iter().enumerate() {
+            let marker = if Some(i) == trace.winner {
+                "\u{2190} winner"
+            } else {
+                "(overridden)"
+            };
+            tel::raw(&format!(
+                "      [{}] {:<34} {:<26} {}",
+                c.rank,
+                c.origin.label(),
+                c.value.display(),
+                marker
+            ));
+        }
+    }
+
+    for name in &ex.missing_snippets {
+        tel::warn_msg(&format!(
+            "unknown snippet `{name}` \u{2014} not defined under `snippets:`"
+        ));
+    }
+
+    Ok(())
 }

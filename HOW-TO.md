@@ -1,4 +1,5 @@
 # HOW-TO: Writing `.media.prompt` Files
+〚📁:7e31c5ab-6936-5407-9dcd-ba7ef5b1c60e〛 media-tool prompt howto :: Quick reference for authoring .media.prompt files (quality + eval first).
 
 Quick reference for creating media prompt files. **Lead with `quality:` and an `eval:` block** — the tool selects the best provider automatically and retries until output passes your criteria. Pinning a specific `service:` is an advanced override for when you need a particular provider feature.
 

@@ -7,8 +7,36 @@ Notation, and renders notation to the browser via VexFlow with optional Web Audi
 Choose it when you need to *reason about* music (analysis, theory, transformation), not just
 draw it.
 
-**Current Version**: 0.16.x  **License**: BSD-3-Clause
+**Version**: viewer-pinned (verify against installed package)  **License**: BSD-3-Clause
 **Bundle**: ~1MB (bundles VexFlow)  **Runtime**: Browser (ES modules); Node possible with a DOM shim
+
+## Generation Artifact Contract
+
+**Native output:** JavaScript ES module (`.js` or `.mjs`), not XML and not an HTML application. Export a named `buildScore(music21)` function returning a `music21.stream.Score`, `Part`, or `Stream`. The host passes the loaded music21j namespace. Construct the requested music using notes, rests, chords, measures, durations, key, meter and tempo; do not add imports, CDN tags, DOM manipulation, playback buttons, soundfont loading or viewer controls unless the user explicitly requests an application.
+
+```javascript
+export function buildScore(music21) {
+  const part = new music21.stream.Part();
+  part.timeSignature = new music21.meter.TimeSignature('4/4');
+  part.keySignature = new music21.key.KeySignature(0);
+  const measure = new music21.stream.Measure();
+  for (const pitch of ['C4', 'E4', 'G4', 'C5']) {
+    const note = new music21.note.Note(pitch);
+    note.duration.quarterLength = 1;
+    measure.append(note);
+  }
+  part.append(measure);
+  return part;
+}
+```
+
+**Prompt content:** describe the music rather than its viewer, for example: “Generate a happy upbeat classical song in C major, 16 bars in 4/4, with a memorable melody, simple piano accompaniment, a contrasting middle phrase and a clear final cadence.” The skill supplies serialization instructions; user prompts need not request play buttons or code scaffolding.
+
+**Separate viewer:** load the module, call `buildScore(music21)`, then render the returned stream with `score.appendNewDOM(container)`. The viewer owns loading music21j, notation rendering, playback controls, audio permissions, error handling and cleanup. Never promise SVG/MIDI/MusicXML exports by listing extra output extensions without an actual converter.
+
+**MusicXML alternative:** MusicXML is a distinct XML score format (`.musicxml`/`.xml`, `<score-partwise>`), not music21j's JavaScript API format. Use the MusicXML guide when XML interchange is requested. The current upstream reader is `new music21.musicxml.xmlToM21.ScoreParser().scoreFromText(xmlString)`; rendering then uses the returned score's `appendNewDOM` method. Compressed `.mxl` requires a packaging/unpacking step; do not generate ZIP bytes as text.
+
+**Verified upstream API:** [project README](https://github.com/cuthbertLab/music21j), [Stream source](https://github.com/cuthbertLab/music21j/blob/master/src/stream.ts), and [MusicXML parser source](https://github.com/cuthbertLab/music21j/blob/master/src/musicxml/xmlToM21.ts). Pin the viewer's runtime version separately from the generated musical document.
 
 ## Official Resources & Documentation
 - Site: https://web.mit.edu/music21/music21j/
@@ -106,7 +134,8 @@ const amb = s.analyze('ambitus');           // pitch range (lowest→highest)
 const tune = music21.tinyNotation.TinyNotation('4/4 c4 d e f g1');
 
 // Parse MusicXML (async)
-const sc = await music21.musicxml.xmlToScore(xmlString);
+const parser = new music21.musicxml.xmlToM21.ScoreParser();
+const sc = parser.scoreFromText(xmlString);
 sc.appendNewDOM(document.body);
 ```
 
@@ -161,7 +190,7 @@ up.appendNewDOM(document.getElementById('container'));
 - Use `replaceDOM` to re-render after edits instead of appending duplicate canvases.
 - Use scientific pitch names (`C#4`, `E-4`) and `quarterLength` for durations.
 - Reach for Tiny Notation for quick test fixtures and generated fragments.
-- Await the async `musicxml.xmlToScore` before rendering.
+- Parse MusicXML with `musicxml.xmlToM21.ScoreParser().scoreFromText`; await `scoreFromUrl` when loading a URL.
 
 ### ❌ Don't
 - Don't expect full Python-music21 parity — the corpus, some analyzers, and exports are reduced in JS.

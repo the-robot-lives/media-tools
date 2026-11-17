@@ -64,7 +64,11 @@ post_processing:
 ```
 Tool: Puppeteer (headless Chromium). Install: `npm install puppeteer`
 
-**TSX/JSX** (.tsx -> .png)
+**Lit components (default)** (.ts/.js -> browser harness -> .png)
+
+Build TypeScript with the host project’s bundler, import the generated module and its `lit` dependency in a minimal HTML harness, then mount the registered custom element. Wait for the element’s `updateComplete` before taking a screenshot. Lit styles use Shadow DOM; do not assume global Tailwind classes style the component.
+
+**Explicitly requested React TSX/JSX** (.tsx -> .png)
 ```yaml
 post_processing:
   - action: render

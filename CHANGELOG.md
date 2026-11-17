@@ -5,6 +5,25 @@ Tags follow `utilities-agent-media-tool/<milestone>`; pre-import milestones (m1�
 are tagged on the original standalone-repo lineage preserved by the subtree squash.
 
 ## [Unreleased]
+### Added
+- Rubric-gated generation (decision-judge phase 2): prep and eval ride the
+  qwen3.8-flash inference profile (`inference:` config section / env / dc
+  chain; Groq demoted to last-resort fallback), image and video outputs are
+  observed (factual per-criterion description by a vision model) before the
+  System One decision judge scores them, `eval.judge:` selects
+  decision vs the legacy text grader, and metadata sidecars record attempt,
+  verdict, per-criterion scores, judge/observer identity and probability
+  distributions. Best-of-N no longer scores against an empty eval (which
+  pinned candidate 1 at 0.0): candidates score against the prompt's own
+  `eval:` block or the asset-type default. (#48) (2026-11-11, on develop)
+
+### Changed
+- CI fast-test-lane: PR/develop `rust-test` runs plain `cargo test --locked` — no coverage
+  instrumentation (llvm-tools-preview + cargo-llvm-cov setup dropped from the job); the
+  line-coverage gate (`cargo llvm-cov --fail-under-lines 25`) moved to `nightly.yml` as a
+  new `rust-coverage` job (same schedule + stage pushes). `web-test` (already no-cover),
+  docker `smoke`, and the main-only release jobs are unchanged. (2026-11-11, on develop)
+
 ### Fixed
 - A prompt declaring `format: png` no longer ships JPEG bytes in a `.png` file. The gemini
   image provider returns JPEG whatever the prompt declares; the tool wrote those bytes to the
@@ -17,8 +36,61 @@ are tagged on the original standalone-repo lineage preserved by the subtree squa
   any source is handled rather than reported as corrupt. (2026-09-21)
 
 ### Added
+- PROJ-FAQ: "Does code review on this repository store anything outside GitHub?" — codemoshiach review memory via the service-consumer pipe, live 2026-11-11. (2026-11-11)
 - `provider_options.base_url` overrides the gemini API root, which is how the new
   stubbed-provider test drives the real provider. (2026-09-21)
+- Three chat-generated asset types join the registry: `cli-tool-mockup`
+  (self-contained HTML embedding the noizu-cli-mockup web component with the
+  screens doc inline in a `<script type="text/plain">` child), `js-shell`
+  (SemTextShell-compatible ES-module command packs), and `text-video`
+  (charmbracelet vhs `.tape` scripts) — each with type-string parsing, default
+  extension, chat-provider ladder routing, prep-channel mapping, and static
+  provider guidance (the mockup guidance carries the canonical screens-doc
+  grammar verbatim). FIM solution docs ship for the tape and js-shell channels;
+  a new soft-dependency `vhs` renderer (src/renderers/vhs.rs) turns `.tape`
+  into GIF when the binary is on PATH and skips with install guidance when
+  not; the test lab advertises all three kinds and the renderer. (2026-10-21)
+- `media-tool models` subcommand: prints the documented Gemini image models and the
+  minimum-version policy offline, no API key or provider init required. (#20) (2026-10-26)
+- Named LLM profiles: connections live in `~/.config/media-tool/llm-profiles.yaml` (or
+  `MEDIA_TOOL_LLM_CONFIG`) with provider presets (openai, anthropic, groq, cerebras,
+  deepseek, zai, alibaba compatible-mode, openrouter, ollama, lmstudio, llamacpp, custom);
+  selection via `--llm-profile` / `MEDIA_TOOL_LLM_PROFILE` / stored default. Credentials
+  stay env-var references, never stored; config writes are atomic with 0600. A new `llm`
+  command family covers configure (TUI), list, add, default, import (LLM Toolkit /
+  queue-populator, never copies secrets), discover, test, and direct `generate`. Chat-backed
+  prompt files resolve to the selected profile as service `llm-profile` — prompt-file
+  service defaults are overridden, explicit `--service` still wins, and profile selection
+  leaves eval/prep to their own flags. Also: a read-only `view` review host
+  (src/review.rs) with shared test-lab review adapters, worktree/installed-binary FIM
+  reference resolution with a 16 KiB guidance budget, `make install` publishing the bundled
+  references plus a `media-tool` symlink, and a Lit-by-default component policy with a new
+  `lit-component` template. (#44) (2026-11-11)
+- Decision judge: a new `judge` subcommand grades a prompt file's text-like output against
+  its `eval` rubric over the System One wire protocol (`src/judge/`), ported from the genai
+  Elixir reference with strict response validation. Two backends — Alibaba
+  (decision-model-preview via the dedicated decision workspace compatible-mode endpoint,
+  dc `services apps.watching_qwen_base_url`) and Jev (jev-latest via TypeSafe) — selected
+  with `--judge`, model with `--judge-model`; base URLs and API keys resolve CLI > `judge:`
+  config section > environment > dc store > backend default through a redacting secrets
+  module (`src/secrets.rs`) that never logs or formats credential values. The
+  rounded-hundredths distribution policy applies automatically for `decision-model-preview`
+  and `jev-*` models (live Jev score scalars drift from Σp·i; user decision 2026-11-11),
+  with `judge: policy: strict|rounded` as an explicit override. One port deviation, forced
+  by live traffic: the reference's `min(count·0.005, 0.01)` mass tolerance rejects real
+  workspace answers (captured sums as low as 0.98 over ten on-grid bins), so the port
+  widens missing-mass allowance to the rounding-eaten bound `count × 0.005`; the bounds
+  and attainable-pre-image checks still reject distributions no unit-sum pre-rounding
+  could produce, and both live payloads are pinned as fixtures. Image/video/audio outputs
+  exit 2 until the Phase 2 observe step lands. Live backends smoke-tested via
+  `cargo test --test live_judge -- --ignored`. (#46) (2026-11-11)
+- Media Workbench v2 design package: `docs/design/media-workbench-v2.md` extends the v1
+  spec with request intake, suitability pre-flight, decision-model grading (per-criterion
+  probability distribution strips), layered style composites, and connected accounts
+  (memory archive + eval export). Ships the 7 user-approved screen comps with their
+  generation prompts in `macos/screens/`, GUI user stories US-101..US-127 under
+  `project-management/user-stories/` (index appended), and a pointer from the v1 doc.
+  (#45) (2026-11-11)
 
 ### Fixed
 - The tool no longer panics while truncating text for display. Every preview of a string the
@@ -107,6 +179,7 @@ are tagged on the original standalone-repo lineage preserved by the subtree squa
 - Added `docs/PROJ-FAQ.md` + summary (motivation/fit/comparison/capability/caveats/trust Q&A) (2026-07-17)
 - Added `docs/PROJ-HOWTO.md` + summary and `docs/howto/` (first-hour, FIM rich-format usage, common-error troubleshooting) (2026-07-17)
 - Added `docs/PROJ-ARCH.md` + summary; refreshed `docs/PROJ-LAYOUT.md` and `docs/layout/src.md` (2026-07-16)
+- Doc sweep 2026-10-26: `PROJ-LAYOUT`, `PROJ-ARCH`, `PROJ-SCHEMA` and `THREAT-MODEL` (+ summaries) re-verified against source — recorded the `preferences:`/`snippets:` cascade, the `vhs` renderer (5 renderers), the three chat asset types, the Gemini 3 image policy, `tests/` and `DECISIONLOG.md` (2026-10-26); `.meta/pointers.yaml` seeded with ten file anchors (#43)
 
 ## [m6-fim-solution-library] — 2026-07-09 — tag: `utilities-agent-media-tool/m6-fim-solution-library`
 Milestone summary: built out the FIM ("fill-in-the-middle") solution library — a

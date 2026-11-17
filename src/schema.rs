@@ -91,6 +91,11 @@ pub struct PromptPayload {
     pub tags: Vec<String>,
     #[serde(default)]
     pub product_targets: Vec<String>,
+    /// Design §4.2 — names of house-style snippets to compose into
+    /// `prompt.system`. Sits at the prompt-file layer of the cascade, so it
+    /// overrides any `snippets:` list a `preferences:` rule supplied.
+    #[serde(default)]
+    pub snippets: Vec<String>,
 }
 
 fn default_schema() -> String {
@@ -251,6 +256,21 @@ pub struct EvalSection {
     /// When true, HTML/SVG may be rasterized (Puppeteer/rsvg) for vision scoring.
     #[serde(default)]
     pub visual: Option<bool>,
+    /// Grader for the LLM arm: `decision` (System One judge; images/video are
+    /// observed first) or `llm` (legacy text/vision LLM grader). Absent
+    /// resolves to `decision` when a judge backend is configured and to `llm`
+    /// otherwise — see `crate::eval`.
+    #[serde(default)]
+    pub judge: Option<String>,
+}
+
+impl EvalSection {
+    /// The requested grader for the LLM arm, before backend availability is
+    /// considered: `decision` | `llm` (None = caller decides the default).
+    // <REMOVED UUID HERE> effective_judge_request :: The requested grader for the LLM arm.
+    pub fn effective_judge_request(&self) -> Option<&str> {
+        self.judge.as_deref().map(str::trim).filter(|j| !j.is_empty())
+    }
 }
 
 impl EvalSection {
@@ -303,6 +323,15 @@ pub struct PromptMeta {
     pub id: String,
     /// Pinned service from YAML (None = auto-select)
     pub service: Option<String>,
+    /// Selector from the config `preferences:` cascade that supplied `service`,
+    /// when the cascade pinned it. `None` when the service came from the prompt
+    /// file, a CLI flag, or auto-selection.
+    ///
+    /// Carried here so a failure message can say *why* a provider the prompt
+    /// file never mentions was chosen. A cascade-pinned service does not fall
+    /// back to the ladder, so a missing key for it is fatal for that prompt —
+    /// and the user should not have to go hunting for the rule responsible.
+    pub service_provenance: Option<String>,
     pub model: Option<String>,
     pub schema_version: String,
     pub quality: Quality,
@@ -324,6 +353,13 @@ pub enum AssetType {
     StyleGuide,
     Diagram,
     Document,
+    /// Chat-generated interactive terminal mockup served as a self-contained
+    /// HTML page embedding the `noizu-cli-mockup` web component.
+    CliToolMockup,
+    /// Chat-generated SemTextShell-compatible JavaScript shell-extension pack.
+    JsShell,
+    /// charmbracelet VHS `.tape` script (CLI "movie script" → GIF).
+    TextVideo,
     Unknown,
 }
 
@@ -353,6 +389,9 @@ impl AssetType {
             "style-guide" => (AssetType::StyleGuide, AudioKind::Voice),
             "diagram" => (AssetType::Diagram, AudioKind::Voice),
             "document" => (AssetType::Document, AudioKind::Voice),
+            "cli-tool-mockup" => (AssetType::CliToolMockup, AudioKind::Voice),
+            "js-shell" => (AssetType::JsShell, AudioKind::Voice),
+            "text-video" => (AssetType::TextVideo, AudioKind::Voice),
             _ => (AssetType::Unknown, AudioKind::Voice),
         }
     }
@@ -369,6 +408,9 @@ impl AssetType {
             AssetType::StyleGuide => "html",
             AssetType::Diagram => "mmd",
             AssetType::Document => "md",
+            AssetType::CliToolMockup => "html",
+            AssetType::JsShell => "mjs",
+            AssetType::TextVideo => "tape",
             AssetType::Unknown => "bin",
         }
     }
@@ -385,6 +427,9 @@ impl AssetType {
                 | AssetType::StyleGuide
                 | AssetType::Diagram
                 | AssetType::Document
+                | AssetType::CliToolMockup
+                | AssetType::JsShell
+                | AssetType::TextVideo
                 | AssetType::Unknown
         )
     }
@@ -459,6 +504,7 @@ pub fn parse_prompt_file(path: &Path) -> color_eyre::Result<ParsedPrompt> {
         output_dir,
         id,
         service: payload.service.clone(),
+        service_provenance: None,
         model: payload.model.clone(),
         schema_version: payload.schema.clone(),
         quality,
@@ -551,5 +597,37 @@ fn detect_asset_info(
                 description: None,
             }],
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_chat_types_parse_route_and_default_extensions() {
+        let cases = [
+            ("cli-tool-mockup", AssetType::CliToolMockup, "html"),
+            ("js-shell", AssetType::JsShell, "mjs"),
+            ("text-video", AssetType::TextVideo, "tape"),
+        ];
+        for (type_str, expected, ext) in cases {
+            let (asset, audio) = AssetType::from_type_str(type_str);
+            assert_eq!(asset, expected, "type string '{type_str}'");
+            assert_eq!(audio, AudioKind::Voice);
+            assert_eq!(asset.default_extension(), ext, "'{type_str}' extension");
+            assert!(asset.is_chat_type(), "'{type_str}' must be a chat type");
+            assert_ne!(asset, AssetType::Unknown);
+        }
+    }
+
+    #[test]
+    fn existing_types_still_parse() {
+        assert_eq!(AssetType::from_type_str("document").0, AssetType::Document);
+        assert_eq!(AssetType::from_type_str("image").0, AssetType::Image);
+        assert_eq!(
+            AssetType::from_type_str("no-such-type").0,
+            AssetType::Unknown
+        );
     }
 }

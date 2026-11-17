@@ -1,0 +1,53 @@
+# Media Workbench v2 — screen comp R1: Request intake sheet over Library (conventional, macOS light appearance)
+schema: "0.4"
+id: mw-screen-request-intake
+type: image
+service: gemini
+model: gemini-3.1-flash-image
+quality: high
+prompt:
+  text: |
+    A straight-on screenshot of a macOS 14 Sonoma desktop app window, light system appearance, SF Pro type, traffic-light buttons top left, unified toolbar. The app is a media-generation workbench: people describe an image or asset they need, the app drafts a prompt and generates it.
+
+    Left: a translucent source-list sidebar with SF Symbols and these rows: "Requests 3", "Library" (selected), "Runs" with a small blue dot and "2", "Styles", a thin divider, "Settings". Behind the sheet, the Library list shows prompt files with small status dots: "pricing-hero", "og-card", "changelog-banner", "onboarding-spot".
+
+    Centre: a standard macOS sheet slides down from the toolbar, titled "New Request", the window behind slightly dimmed. A plain form, not a chat window. Labels sit above fields:
+    - "Intent": a one-line text field reading "Hero image for the pricing page".
+    - "Type": a pop-up button reading "Image". Beside it an open menu grouped by modality: "Image", "SVG", "Video", "Music", and one greyed-out row "Diagram" with a small caption "graphviz missing".
+    - "Usage": a text field reading "pricing hero, 16:10, dark bg".
+    - "Style": two small rounded chips "House" and "codefre.sh".
+    - "References": a drop zone holding two small image thumbnails.
+    - "Quality": a segmented control "Draft | Standard | High" with "High" selected.
+    - A quiet info row with a small clock-arrow icon: "3 past wins for image/hero".
+    Bottom right of the sheet: a secondary "Cancel" button and one blue default button "Draft prompt" with a "⌘↩" hint.
+
+    Calm, native, generous spacing, one primary action. Short legible labels only.
+  negative: >
+    garbled text, lorem ipsum, watermark, mobile frame, browser chrome, Windows UI,
+    perspective tilt, synthesizer/audio-hardware look, CAD tool, manuscript editor,
+    chat bubbles, chat window, dark mode, gradient hero, emoji icons, photorealistic human
+  style: "UI design screen comp, straight-on screenshot framing, no perspective, no camera tilt, crisp pixel-sharp interface"
+output:
+  formats:
+    - format: png
+      quality: 95
+  dimensions:
+    width: 2560
+    height: 1600
+    aspect_ratio: "16:10"
+eval:
+  pass_threshold: 0.7
+  criteria:
+    depicts_the_product:
+      weight: 0.4
+      description: "reads as a media-generation request/review/grading tool, specifically a form where a user describes a needed asset (intent, type, usage) and asks the app to draft a prompt"
+    follows_spec:
+      weight: 0.35
+      description: "shows (1) a macOS sheet form with Intent / Type / Usage / Style fields, not a chat; (2) a type picker with one greyed-out capability-disabled type; (3) one primary 'Draft prompt' button; (4) the source-list sidebar with Requests / Library / Runs / Styles / Settings"
+    macos_native:
+      weight: 0.25
+      description: "reads as a native macOS 14 light-appearance window: traffic lights, sheet presentation, source list, SF type, system controls"
+  reject_if:
+    - depicts a different product category (chat app, CAD tool, manuscript editor, audio hardware, web page)
+    - primary labels (Intent, Type, Draft prompt) are unreadable or garbled
+tags: [screen-comp, macos, media-workbench, v2]

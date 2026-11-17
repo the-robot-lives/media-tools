@@ -116,6 +116,7 @@ pub async fn run_lab(cfg: LabConfig) -> color_eyre::Result<()> {
     let app = Router::new()
         .route("/", get(index_page))
         .route("/view", get(viewer_page))
+        .route("/review-adapters.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], crate::review::ADAPTERS) }))
         .route("/api/health", get(health))
         .route("/api/kinds", get(api_kinds))
         .route("/api/graph", get(api_graph))
@@ -475,6 +476,27 @@ async fn api_graph(State(st): State<AppState>) -> Result<Json<serde_json::Value>
             AssetType::Diagram,
             AudioKind::Voice,
         ),
+        (
+            "cli-tool-mockup",
+            "CLI tool mockup",
+            "Interactive terminal mockups as self-contained HTML (noizu-cli-mockup)",
+            AssetType::CliToolMockup,
+            AudioKind::Voice,
+        ),
+        (
+            "js-shell",
+            "JS shell pack",
+            "SemTextShell-compatible command packs (.mjs ES modules)",
+            AssetType::JsShell,
+            AudioKind::Voice,
+        ),
+        (
+            "text-video",
+            "Text video (vhs tape)",
+            "charmbracelet vhs .tape scripts — terminal GIFs from a chat model",
+            AssetType::TextVideo,
+            AudioKind::Voice,
+        ),
     ];
 
     let mut media_children = Vec::new();
@@ -766,6 +788,27 @@ async fn api_kinds(State(st): State<AppState>) -> Result<Json<serde_json::Value>
             "Style guide",
             "Design-system style guide pages.",
             AssetType::StyleGuide,
+            AudioKind::Voice,
+        ),
+        (
+            "cli-tool-mockup",
+            "CLI tool mockup",
+            "Interactive terminal mockups served as a self-contained HTML page.",
+            AssetType::CliToolMockup,
+            AudioKind::Voice,
+        ),
+        (
+            "js-shell",
+            "JS shell pack",
+            "SemTextShell-compatible ES-module command packs.",
+            AssetType::JsShell,
+            AudioKind::Voice,
+        ),
+        (
+            "text-video",
+            "Text video (vhs tape)",
+            "charmbracelet vhs .tape scripts rendered locally to GIF.",
+            AssetType::TextVideo,
             AudioKind::Voice,
         ),
     ];
@@ -1247,7 +1290,7 @@ async fn run_eval_job(st: &AppState, body: &EvalBody) -> Result<serde_json::Valu
         .payload
         .eval
         .clone()
-        .unwrap_or_else(default_eval_for_type);
+        .unwrap_or_else(crate::eval::default_eval_for_type);
 
     let evaluator = Evaluator::resolve(None, None, st.inner.cfg.verbose)
         .await
@@ -1290,37 +1333,6 @@ async fn run_eval_job(st: &AppState, body: &EvalBody) -> Result<serde_json::Valu
     }
 }
 
-fn default_eval_for_type() -> crate::schema::EvalSection {
-    use crate::schema::{EvalCriterion, EvalSection};
-    let mut criteria = HashMap::new();
-    criteria.insert(
-        "relevance".into(),
-        EvalCriterion {
-            weight: Some(3.0),
-            scale: None,
-            description: Some("Matches the generation brief".into()),
-            fail_signals: vec![],
-        },
-    );
-    criteria.insert(
-        "quality".into(),
-        EvalCriterion {
-            weight: Some(2.0),
-            scale: None,
-            description: Some("Overall technical and aesthetic quality".into()),
-            fail_signals: vec![],
-        },
-    );
-    EvalSection {
-        pass_threshold: Some(0.7),
-        max_attempts: None,
-        required_pass: vec!["relevance".into()],
-        criteria,
-        reject_if: vec![],
-        mode: None,
-        visual: None,
-    }
-}
 
 fn find_sibling_prompt(media: &Path) -> Option<PathBuf> {
     let parent = media.parent()?;
@@ -2068,7 +2080,11 @@ fn normalize_formats(existing: Option<&serde_yaml::Value>, default_ext: &str) ->
 
 fn default_ext_for_channel(tf: &str) -> &'static str {
     let t = tf.to_lowercase();
-    if t.contains("mermaid") {
+    if t == "tape" || t.contains("vhs") {
+        "tape"
+    } else if t == "js-shell" || t == "mjs" {
+        "mjs"
+    } else if t.contains("mermaid") {
         "mmd"
     } else if t.contains("plantuml") || t == "puml" {
         "puml"
@@ -2096,9 +2112,11 @@ fn default_ext_for_type(type_key: &str) -> &'static str {
         "image" | "svg" => "png",
         "video" => "mp4",
         "music" | "voice" | "audio" | "sfx" => "mp3",
-        "html" | "game" | "style-guide" => "html",
+        "html" | "game" | "style-guide" | "cli-tool-mockup" => "html",
         "react-page" | "component" => "tsx",
         "diagram" => "mmd",
+        "js-shell" => "mjs",
+        "text-video" => "tape",
         _ => "md",
     }
 }
