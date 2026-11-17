@@ -1,0 +1,56 @@
+# Media Workbench v2 — screen comp S1 (⌘E): Effective composite with per-row provenance (conventional, macOS light appearance)
+schema: "0.4"
+id: mw-screen-styles-composite
+type: image
+service: gemini
+model: gemini-3.1-flash-image
+quality: high
+prompt:
+  text: |
+    A straight-on screenshot of a macOS 14 Sonoma app window, light system appearance, SF Pro type, traffic lights, unified toolbar titled "Styles" with a segmented control "Edit | Effective" where "Effective" is selected. The app is a media-generation workbench; this view shows the merged house style for one prompt and which layer won each rule.
+
+    Far left: the translucent source-list sidebar: "Requests 3", "Library", "Runs 2", "Styles" (selected), divider, "Settings".
+
+    Next: the narrow "Layers" pane with four stacked rows, each with a small coloured dot: "House" (grey), "Project · codefre.sh" (blue), "Collection · landing" (purple), "Prompt · pricing-hero" (orange).
+
+    Main area: a header row with a pop-up "Sample: pricing-hero", a small green chip "evalonomi · checksum match", and a muted "sha 3f9a1c".
+    Below, a clean table with columns "Rule", "Value", "Layer", "Trail". Each Layer cell is a small rounded tag in that layer's colour. Rows:
+    - "palette.accent" · "#FF6B4A" with a coral swatch · tag "Project" · trail "House #C9A227 → Project".
+    - "type.headline" · "SF Pro Display Semibold" · tag "House" · trail "—".
+    - "voice.tone" · "plain, confident" · tag "Project" · trail "House → Project".
+    - "construction.radius" · "12 pt" · tag "Collection" · trail "8 → 10 → 12".
+    - "rubric.legibility" · "0.20 required" · tag "House" · trail "—".
+    - "rubric.brand-voice" · "0.15 amend" · tag "Project" · trail "House → Project".
+    - "rubric.photoreal" · value struck through "suppressed" · tag "Prompt" · trail "House → Prompt".
+    One row is selected with a light blue highlight, and a small popover beside it shows a vertical trail of three layer tags with arrows.
+
+    Calm, dense, readable table; left-aligned. Short legible labels and numbers only.
+  negative: >
+    garbled text, lorem ipsum, watermark, mobile frame, browser chrome, Windows UI,
+    perspective tilt, synthesizer/audio-hardware look, CAD tool, manuscript editor,
+    dark mode, spreadsheet app, git diff tool, emoji icons, code editor
+  style: "UI design screen comp, straight-on screenshot framing, no perspective, no camera tilt, crisp pixel-sharp interface"
+output:
+  formats:
+    - format: png
+      quality: 95
+  dimensions:
+    width: 2560
+    height: 1600
+    aspect_ratio: "16:10"
+eval:
+  pass_threshold: 0.7
+  criteria:
+    depicts_the_product:
+      weight: 0.4
+      description: "reads as a media-generation request/review/grading tool, specifically the resolved (effective) brand style for one prompt, showing which style layer won each rule"
+    follows_spec:
+      weight: 0.35
+      description: "shows (1) a composite table of style rules (palette, type, voice, construction, rubric); (2) a winning-layer tag on every row, colour-matched to the layer stack; (3) an override trail per row such as House → Project; (4) a suppressed rubric row and a checksum/source indicator"
+    macos_native:
+      weight: 0.25
+      description: "reads as a native macOS 14 light-appearance window with source list, table, segmented control and popover"
+  reject_if:
+    - depicts a different product category (spreadsheet, git client, CAD tool, manuscript editor, audio hardware, web page)
+    - primary labels (Rule, Layer, row names, layer tags) are unreadable or garbled
+tags: [screen-comp, macos, media-workbench, v2]

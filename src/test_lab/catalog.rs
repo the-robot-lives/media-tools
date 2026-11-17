@@ -76,6 +76,9 @@ pub fn type_label(type_key: &str) -> &'static str {
         "style-guide" => "Style guide",
         "document" => "Document",
         "game" => "Game (HTML)",
+        "cli-tool-mockup" => "CLI tool mockup",
+        "js-shell" => "JS shell pack",
+        "text-video" => "Text video (vhs tape)",
         _ => "Other",
     }
 }

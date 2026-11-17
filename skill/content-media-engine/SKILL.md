@@ -13,7 +13,7 @@ extended_description: >
   for Dev.to or Substack or Medium, plan a content calendar, design an article series,
   build a content funnel, find the right visualization library for article media, generate
   SVG graphics or illustrations, create Mermaid or PlantUML or Graphviz diagrams, scaffold
-  HTML or React pages, produce LaTeX or Typst documents, compose ABC or LilyPond music
+  HTML or React pages, scaffold Lit web components (React only when explicitly requested), produce LaTeX or Typst documents, compose ABC or LilyPond music
   notation, create WaveDrom timing diagrams, author KaTeX math expressions, or create any
   .media.prompt file targeting text-based output -- even if they don't say "content media
   engine." Also trigger when users mention trend research, keyword mining, topic validation,
@@ -62,7 +62,7 @@ This skill provides two complementary capabilities:
 - **Optimizing for platforms** — Dev.to tags/timing, Substack conversion, Medium SEO
 - **Planning content calendars** — Monthly schedules, pillar mapping, cross-posting timelines
 - **Designing content funnels** — Discovery -> engagement -> conversion strategies
-- **Generating media assets** — SVG, Mermaid, PlantUML, Graphviz, HTML, React/TSX, LaTeX, Typst, ABC, LilyPond, WaveDrom, KaTeX via `.media.prompt` files
+- **Generating media assets** — SVG, Mermaid, PlantUML, Graphviz, HTML, Lit components, explicitly requested React/TSX, LaTeX, Typst, ABC, LilyPond, WaveDrom, KaTeX via `.media.prompt` files
 - **Authoring .media.prompt files** — Structured YAML that drives LLM providers to produce text-based media
 - **Choosing media providers** — Provider and model selection for different format categories
 
@@ -86,7 +86,8 @@ This skill includes a complete system for generating text-based media assets via
 | drawio | diagram | .drawio | Opens in draw.io | XML-based, complex layouts |
 | svg | image | .svg | Direct use | Logos, icons, illustrations |
 | html | page | .html | .png via puppeteer | Landing pages, dashboards |
-| tsx | component | .tsx | .png via puppeteer | React components with Tailwind |
+| ts | component | .ts | Browser harness after build | Default: Lit web component using LitElement |
+| tsx | component / react-page | .tsx | .png via puppeteer | React only when explicitly requested |
 | latex | document | .tex | .pdf via pdflatex | Papers, equations, formal docs |
 | typst | document | .typ | .pdf via typst | Modern alternative to LaTeX |
 | abc | music | .abc | Render via abcjs | Folk tunes, lead sheets |
@@ -101,6 +102,21 @@ This skill includes a complete system for generating text-based media assets via
 3. Generate a `.media.prompt` YAML file with system prompt, user prompt, provider config, and output format
 4. Run `generate-media-prompt <file>.media.prompt`
 5. CLI calls the LLM, writes primary output, runs the render chain
+
+### Native Artifacts and Separate Viewers
+
+Extended asset types name the target notation, document format or library; they do not imply an HTML application. Read the target solution guide's generation-artifact contract and supply its serialization rules as system context. Keep `prompt.text` focused on the desired content. Generate XML for an XML score/document format, a native DSL for a DSL, and JavaScript when a library's native interface is JavaScript. Do not wrap every type in HTML or invent a universal XML contract.
+
+For example, `music21j` generates a JavaScript score module exposing `buildScore(music21)`; `musicxml` generates XML score data. “Generate a happy upbeat classical song in C major…” is a sufficient musical brief once the skill supplies the output contract. Loading libraries, rendering documents and offering playback controls belong in the separate viewer/review layer unless an application is explicitly requested. List secondary SVG/PDF/MIDI outputs only when a real render/export adapter produces them.
+
+### Component Framework Default
+
+For `type: component`, generate a **Lit web component by default**: extend `LitElement`, use Lit `html`/`css` templates, register a custom element, and output TypeScript (`text_format: ts`, `.ts`) unless JavaScript is requested. Use reactive properties, scoped styles, slots and CustomEvents where appropriate. Do not infer React from the word “component.”
+
+Generate React only when the user explicitly asks for React, JSX/TSX, or a React-specific component contract. In that case use `text_format: tsx` (or `jsx`) and the React template. `type: react-page` remains explicitly React; it does not change the default for `component`.
+
+- Default Lit template: [references/prompt-templates/lit-component.md](references/prompt-templates/lit-component.md)
+- Explicit React template: [references/prompt-templates/react-component.md](references/prompt-templates/react-component.md)
 
 ### Provider Selection
 
@@ -387,7 +403,7 @@ Detailed implementation guides for visualization tools, document formats, and me
 Pre-built system prompts and example configurations for each media format:
 - `diagram-mermaid.md`, `diagram-plantuml.md`, `diagram-graphviz.md`, `diagram-drawio.md` — Diagram formats
 - `svg-illustration.md` — SVG logos, icons, illustrations
-- `html-page.md`, `react-component.md` — Pages and components
+- `html-page.md`, `lit-component.md`, `react-component.md` — HTML pages, default Lit components, and explicitly requested React components
 - `latex-document.md`, `typst-document.md` — Document formats
 - `music-abc.md`, `music-lilypond.md` — Music notation
 - `wavedrom-timing.md` — Engineering timing diagrams

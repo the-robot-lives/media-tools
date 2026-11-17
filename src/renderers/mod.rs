@@ -2,6 +2,7 @@ pub mod graphviz;
 pub mod mermaid;
 pub mod plantuml;
 pub mod puppeteer;
+pub mod vhs;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -25,6 +26,7 @@ pub fn get_renderer(tool: &str) -> Option<Box<dyn Renderer>> {
         "plantuml" => Some(Box::new(plantuml::PlantUmlRenderer)),
         "graphviz" => Some(Box::new(graphviz::GraphvizRenderer)),
         "puppeteer" => Some(Box::new(puppeteer::PuppeteerRenderer)),
+        "vhs" => Some(Box::new(vhs::VhsRenderer)),
         _ => None,
     }
 }

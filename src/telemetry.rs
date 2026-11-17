@@ -39,6 +39,7 @@
 //! | `run.started` | `total_outputs`, `total_prompts`, `variant_count`, `dry_run` |
 //! | `run.completed` | `succeeded`, `failed`, `dry_run` |
 //! | `plan.item` | `prompt_id`, `asset_type`, `service`, `model`, `output_path` |
+//! | `preferences.applied` | `prompt_id`, `service`, `model`, `quality`, `snippet_count` (`u64`) — string fields are `""` when that field was not set by a config rule |
 //! | `output.started` | `prompt_id`, `index`, `total`, `output_path` |
 //! | `output.completed` | `prompt_id`, `output_path`, `ok`, `service`, `score` (`f64`, `-1.0` when unscored) |
 //! | `attempt.started` | `prompt_id`, `attempt`, `total_attempts`, `service`, `model`, `output_path` |
@@ -271,6 +272,31 @@ pub mod progress {
             succeeded = succeeded as u64,
             failed = failed as u64,
             dry_run = dry_run,
+        );
+    }
+
+    /// The preference cascade (design §4.3) supplied settings a prompt file did
+    /// not. Emitted once per prompt, only when something was actually applied.
+    ///
+    /// `service` / `model` / `quality` are `""` when that field came from the
+    /// prompt file or a CLI flag rather than a config rule — a consumer reads
+    /// one typed field instead of branching on presence, as elsewhere here.
+    pub fn preferences_applied(
+        prompt_id: &str,
+        service: &str,
+        model: &str,
+        quality: &str,
+        snippet_count: usize,
+    ) {
+        event!(
+            target: super::TARGET_PROGRESS,
+            Level::INFO,
+            event = "preferences.applied",
+            prompt_id = prompt_id,
+            service = service,
+            model = model,
+            quality = quality,
+            snippet_count = snippet_count as u64,
         );
     }
 

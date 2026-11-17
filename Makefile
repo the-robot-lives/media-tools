@@ -1,5 +1,6 @@
 INSTALL_DIR ?= $(HOME)/.local/bin
 LIB_INSTALL_DIR ?= $(HOME)/.local/lib/media-tools
+SHARE_INSTALL_DIR ?= $(HOME)/.local/share/media-tool
 
 .PHONY: compile build test test-unit test-structural test-live install clean uninstall install-legacy lab report
 
@@ -57,6 +58,9 @@ install: build
 	else \
 		mkdir -p $(INSTALL_DIR); \
 		install -m 755 target/release/generate-media-prompt $(INSTALL_DIR)/generate-media-prompt; \
+		ln -sf generate-media-prompt $(INSTALL_DIR)/media-tool; \
+		mkdir -p $(SHARE_INSTALL_DIR)/fim/solution; \
+		cp -R skill/content-media-engine/references/fim/solution/. $(SHARE_INSTALL_DIR)/fim/solution/; \
 		echo "✓ Installed generate-media-prompt (Rust)"; \
 	fi
 
@@ -70,5 +74,5 @@ clean:
 	@cargo clean 2>/dev/null || true
 
 uninstall:
-	@rm -f $(INSTALL_DIR)/generate-media-prompt
+	@rm -f $(INSTALL_DIR)/generate-media-prompt $(INSTALL_DIR)/media-tool
 	@rm -rf $(LIB_INSTALL_DIR)

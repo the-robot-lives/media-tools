@@ -122,13 +122,20 @@ pub fn route_for(options: &GenerationOptions, has_attachments: bool) -> Route {
     }
 }
 
-/// The text2image route does not accept the multimodal model ids: `qwen-image-3.0` there
-/// answers 400 InvalidParameter. Map the multimodal default onto the text2image family and
-/// leave anything already valid alone.
+/// DashScope rejects the qwen-image family on `text2image/image-synthesis` with 400
+/// InvalidParameter ("url error, please check url!" / "Model not exist."): that endpoint
+/// serves the wan t2i family on our accounts. Map the qwen-image ids and the empty/default
+/// placeholder onto the wan id that the endpoint actually accepts. Live-probed 2026-11-17:
+/// `wan2.2-t2i-flash` -> 200, `qwen-image` / `qwen-image-plus` / `wanx2.1-t2i-turbo` -> 404.
 pub fn text2image_model(model: &str) -> &str {
     match model {
-        "qwen-image-3.0" | "qwen-image-3" | "default" | "" => "qwen-image",
-        other => other,
+        "qwen-image-3.0" | "qwen-image-3" | "qwen-image" | "qwen-image-plus" | "default" | "" => {
+            "wan2.2-t2i-flash"
+        }
+        other if other.starts_with("wan") => other,
+        // Anything else is a qwen-family id the endpoint will reject; fall back to the
+        // known-good default.
+        _ => "wan2.2-t2i-flash",
     }
 }
 

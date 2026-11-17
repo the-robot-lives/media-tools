@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use serde_json::json;
@@ -58,6 +59,7 @@ pub fn prep_channel(
     if matches!(
         tf.as_str(),
         "mermaid" | "mmd" | "plantuml" | "puml" | "graphviz" | "dot" | "drawio" | "wavedrom"
+            | "tape"
     ) {
         return PrepChannel::Diagram;
     }
@@ -66,7 +68,7 @@ pub fn prep_channel(
     }
     if matches!(
         tf.as_str(),
-        "tsx" | "jsx" | "ts" | "js" | "react" | "react-page" | "component"
+        "tsx" | "jsx" | "ts" | "js" | "mjs" | "react" | "react-page" | "component"
     ) {
         return PrepChannel::Code;
     }
@@ -93,6 +95,12 @@ pub fn prep_channel(
         AssetType::Html | AssetType::StyleGuide => PrepChannel::Html,
         AssetType::Component | AssetType::ReactPage => PrepChannel::Code,
         AssetType::Document => PrepChannel::Document,
+        // cli-tool-mockup emits a self-contained HTML page (screens doc embedded).
+        AssetType::CliToolMockup => PrepChannel::Html,
+        // js-shell emits an ES module of SemTextShell CommandSpecs.
+        AssetType::JsShell => PrepChannel::Code,
+        // text-video emits a vhs .tape script — an ordered terminal-session DSL.
+        AssetType::TextVideo => PrepChannel::Diagram,
         AssetType::Unknown => PrepChannel::Generic,
     }
 }
@@ -267,14 +275,18 @@ pub struct PromptPrepper {
     pub base_url: String,
     pub model: String,
     pub api_key: String,
+    /// Alibaba qwen3.8-flash inference profile — the default prep path
+    /// (Phase 2). When present it drives chat; `base_url` stays empty.
+    pub inference: Option<crate::inference::InferenceConfig>,
 }
 
 impl PromptPrepper {
     /// Resolve the prompt preparation LLM endpoint.
     ///
-    /// Priority:
+    /// Priority (Phase 2):
     ///   1. MEDIA_PREP_BASE_URL env / --prep-url   (OpenAI-compatible endpoint)
-    ///   2. Groq cloud API (GROQ_API_KEY must be set)
+    ///   2. qwen3.8-flash inference profile (secrets.rs credential chain)
+    ///   3. Groq cloud API (GROQ_API_KEY must be set) — explicit fallback
     ///
     /// Model: MEDIA_PREP_MODEL env / --prep-model, else default.
     // <REMOVED UUID HERE> resolve :: Resolve the prompt preparation LLM endpoint.
@@ -283,15 +295,17 @@ impl PromptPrepper {
         cli_model: Option<&str>,
         verbose: bool,
     ) -> Option<PromptPrepper> {
-        let model = cli_model
+        let model_override = cli_model
             .map(|s| s.to_string())
-            .or_else(|| std::env::var("MEDIA_PREP_MODEL").ok())
+            .or_else(|| std::env::var("MEDIA_PREP_MODEL").ok().filter(|m| !m.is_empty()));
+        let model = model_override
+            .clone()
             .unwrap_or_else(|| DEFAULT_PREP_MODEL.to_string());
 
         // Priority 1: explicit override
         if let Some(url) = cli_url
             .map(|s| s.to_string())
-            .or_else(|| std::env::var("MEDIA_PREP_BASE_URL").ok())
+            .or_else(|| std::env::var("MEDIA_PREP_BASE_URL").ok().filter(|u| !u.is_empty()))
         {
             let api_key = std::env::var("MEDIA_PREP_API_KEY").unwrap_or_else(|_| "none".into());
             if verbose {
@@ -304,31 +318,164 @@ impl PromptPrepper {
                 base_url: url,
                 model,
                 api_key,
+                inference: None,
             });
         }
 
-        // Priority 2: Groq cloud
-        if let Ok(key) = std::env::var("GROQ_API_KEY") {
-            if !key.is_empty() {
-                if verbose {
-                    tel::verbose(&format!("Prompt prep via Groq (model: {})", model));
-                }
-                return Some(PromptPrepper {
-                    base_url: GROQ_API_URL
-                        .trim_end_matches("/chat/completions")
-                        .to_string(),
-                    model,
-                    api_key: key,
-                });
+        // Priority 2: qwen3.8-flash inference profile (default)
+        let loaded = crate::provider_config::loaded();
+        if let Ok(inference) = crate::inference::InferenceConfig::resolve(loaded.map(|l| &l.inference)) {
+            let effective_model = model_override
+                .clone()
+                .unwrap_or_else(|| inference.model.clone());
+            if verbose {
+                tel::verbose(&format!(
+                    "Prompt prep via inference profile: {} @ {} (model: {})",
+                    inference.model, inference.base, effective_model
+                ));
             }
+            return Some(PromptPrepper {
+                base_url: String::new(),
+                model: effective_model,
+                api_key: String::new(),
+                inference: Some(inference),
+            });
+        }
+
+        // Priority 3: Groq cloud (explicit fallback profile)
+        if let Some(key) = std::env::var("GROQ_API_KEY").ok().filter(|k| !k.is_empty()) {
+            if verbose {
+                tel::verbose(&format!("Prompt prep via Groq (model: {})", model));
+            }
+            return Some(PromptPrepper {
+                base_url: GROQ_API_URL
+                    .trim_end_matches("/chat/completions")
+                    .to_string(),
+                model,
+                api_key: key,
+                inference: None,
+            });
         }
 
         if verbose {
             tel::verbose(
-                "No prompt prep endpoint available (set GROQ_API_KEY or MEDIA_PREP_BASE_URL)",
+                "No prompt prep endpoint available (set QWEN_API_KEY, GROQ_API_KEY or MEDIA_PREP_BASE_URL)",
             );
         }
         None
+    }
+
+    /// One chat round trip over whichever lane resolved: the inference
+    /// profile (secrets.rs credential) or the legacy OpenAI-compatible POST.
+    /// Returns the raw assistant content.
+    async fn send_chat(
+        &self,
+        content: serde_json::Value,
+        temperature: f64,
+        max_tokens: u32,
+        system: &str,
+        label: &str,
+        verbose: bool,
+    ) -> Option<String> {
+        if let Some(inference) = &self.inference {
+            let (text, attachments) = crate::inference::split_chat_content(&content);
+            let options = HashMap::from([
+                ("max_tokens".to_string(), serde_yaml::Value::Number(max_tokens.into())),
+                ("temperature".to_string(), serde_yaml::Value::Number(temperature.into())),
+            ]);
+            if verbose {
+                tel::verbose(&format!(
+                    "{} via inference profile {} (model {})",
+                    label, inference.base, inference.model
+                ));
+            }
+            return match inference.complete(system, &text, &options, &attachments).await {
+                Ok(raw) => Some(raw),
+                Err(e) => {
+                    if verbose {
+                        tel::verbose(&format!("{} inference request failed: {e:#}", label));
+                    }
+                    None
+                }
+            };
+        }
+        if self.base_url.is_empty() {
+            if verbose {
+                tel::verbose(&format!("{}: no endpoint configured", label));
+            }
+            return None;
+        }
+        let url = if self.base_url.ends_with("/chat/completions") {
+            self.base_url.clone()
+        } else {
+            format!("{}/chat/completions", self.base_url)
+        };
+
+        let body = json!({
+            "model": self.model,
+            "messages": [{"role": "user", "content": content}],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        });
+
+        let client = reqwest::Client::new();
+
+        if verbose {
+            tel::verbose(&format!(
+                "{} POST {} (service lane, model={})",
+                label, url, self.model
+            ));
+        }
+
+        let resp = match client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .timeout(Duration::from_secs(60))
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                if verbose {
+                    tel::verbose(&format!("{} request failed: {}", label, e));
+                }
+                return None;
+            }
+        };
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            if verbose {
+                tel::verbose(&format!(
+                    "{} HTTP {}: {}",
+                    label,
+                    status,
+                    crate::text::truncate(&body_text, 200)
+                ));
+            }
+            return None;
+        }
+
+        let val: serde_json::Value = match resp.json().await {
+            Ok(v) => v,
+            Err(e) => {
+                if verbose {
+                    tel::verbose(&format!("{} response parse error: {}", label, e));
+                }
+                return None;
+            }
+        };
+
+        Some(
+            val["choices"][0]["message"]["content"]
+                .as_str()
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+        )
     }
 
     // <REMOVED UUID HERE> prepare_prompt :: auto-generated pointer for public function prepare_prompt
@@ -387,74 +534,20 @@ impl PromptPrepper {
             "",
         );
 
-        let url = if self.base_url.ends_with("/chat/completions") {
-            self.base_url.clone()
-        } else {
-            format!("{}/chat/completions", self.base_url)
-        };
-
-        let body = json!({
-            "model": self.model,
-            "messages": [{"role": "user", "content": instruction}],
-            "temperature": 0.3,
-            "max_tokens": 2048,
-        });
-
-        let client = reqwest::Client::new();
-
-        if verbose {
-            tel::verbose(&format!(
-                "Prompt prep POST {} (service={}, model={})",
-                url, service, self.model
-            ));
-        }
-
-        let resp = match client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .timeout(Duration::from_secs(60))
-            .send()
+        let raw = match self
+            .send_chat(
+                json!(instruction),
+                0.3,
+                2048,
+                "You are a prompt preparation assistant. You reply with the exact JSON schema requested.",
+                "Prompt prep",
+                verbose,
+            )
             .await
         {
-            Ok(r) => r,
-            Err(e) => {
-                if verbose {
-                    tel::verbose(&format!("Prompt prep request failed: {}", e));
-                }
-                return None;
-            }
+            Some(raw) => raw,
+            None => return None,
         };
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body_text = resp.text().await.unwrap_or_default();
-            if verbose {
-                tel::verbose(&format!(
-                    "Prompt prep HTTP {}: {}",
-                    status,
-                    crate::text::truncate(&body_text, 200)
-                ));
-            }
-            return None;
-        }
-
-        let val: serde_json::Value = match resp.json().await {
-            Ok(v) => v,
-            Err(e) => {
-                if verbose {
-                    tel::verbose(&format!("Prompt prep response parse error: {}", e));
-                }
-                return None;
-            }
-        };
-
-        let raw = val["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("")
-            .trim()
-            .to_string();
 
         if verbose {
             tel::verbose(&format!("Prompt prep raw: {}", crate::text::truncate(&raw, 300)));
@@ -557,12 +650,6 @@ impl PromptPrepper {
             eval_notes,
         );
 
-        let url = if self.base_url.ends_with("/chat/completions") {
-            self.base_url.clone()
-        } else {
-            format!("{}/chat/completions", self.base_url)
-        };
-
         // Build message content — text instruction + optional failed output image
         let content = if let Some(output_path) = failed_output {
             let ext = output_path
@@ -610,62 +697,20 @@ impl PromptPrepper {
             json!(instruction)
         };
 
-        let body = json!({
-            "model": self.model,
-            "messages": [{"role": "user", "content": content}],
-            "temperature": 0.4,
-            "max_tokens": 2048,
-        });
-
-        let client = reqwest::Client::new();
-
-        if verbose {
-            tel::verbose(&format!(
-                "Prompt refine POST {} (vision-informed refinement)",
-                url
-            ));
-        }
-
-        let resp = match client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .timeout(Duration::from_secs(60))
-            .send()
+        let raw = match self
+            .send_chat(
+                content,
+                0.4,
+                2048,
+                "You are a prompt refinement assistant. You reply with the exact JSON schema requested.",
+                "Prompt refine",
+                verbose,
+            )
             .await
         {
-            Ok(r) => r,
-            Err(e) => {
-                if verbose {
-                    tel::verbose(&format!("Prompt refine request failed: {}", e));
-                }
-                return None;
-            }
+            Some(raw) => raw,
+            None => return None,
         };
-
-        if !resp.status().is_success() {
-            if verbose {
-                tel::verbose(&format!("Prompt refine HTTP {}", resp.status()));
-            }
-            return None;
-        }
-
-        let val: serde_json::Value = match resp.json().await {
-            Ok(v) => v,
-            Err(e) => {
-                if verbose {
-                    tel::verbose(&format!("Prompt refine response error: {}", e));
-                }
-                return None;
-            }
-        };
-
-        let raw = val["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("")
-            .trim()
-            .to_string();
 
         if verbose {
             tel::verbose(&format!(
@@ -827,6 +872,52 @@ pub fn provider_prompt_guidance(
              - Return the speaking text VERBATIM — do not rewrite\n\
              - Only clean formatting (remove bullets, headers)\n\
              - Voice style direction belongs in provider_options, not the prompt"
+        }
+        (_, AssetType::CliToolMockup) => {
+            "PROVIDER NOTES (CLI tool mockup):\n\
+             - Output is ONE self-contained HTML page that loads the noizu-cli-mockup web\n\
+             component from https://cdn.derobot.is/tobor-kit/latest/components/cli-mockup/noizu-cli-mockup.js\n\
+             - The screens doc ships verbatim inside <noizu-cli-mockup> as a\n\
+             <script type=\"text/plain\"> child — no reformatting, no markdown fences\n\
+             - Screens doc grammar (the artifact serves exactly this syntax):\n\
+             \n\
+             @screen <id> [\"<title>\"]\n\
+             <verbatim unicode/text lines>\n\
+             [[<label> -> #<target-id>]]                    # click → goto screen <target-id>\n\
+             [[<label> -> run:<command>]]                   # click → js-shell action\n\
+             [[<label> -> #<target-id>|run:<command>]]      # compound: action then goto\n\
+             \n\
+             ids: integer or [A-Za-z0-9_-]+, unique; first screen is the start; `]]` may not\n\
+             appear in labels; literal `[[` escaped `\\[[`.\n\
+             - Keep unicode box-drawing and terminal text lines byte-exact from the brief\n\
+             - Preserve screen order — the first @screen is the start screen"
+        }
+        (_, AssetType::JsShell) => {
+            "PROVIDER NOTES (JS shell pack — SemTextShell plugin):\n\
+             - Emit ONE ES module (.mjs) whose default export is an array of CommandSpec\n\
+             objects — one per command the pack provides\n\
+             - Each command declares { name, usage, run(ctx) }: name matches\n\
+             /^[a-z][a-z0-9-]*$/ and is unique across the terminal; usage is the help line\n\
+             (e.g. \"greet [-n] <who>\"); run(ctx) receives ctx.args (argv after the command\n\
+             name), ctx.stdin (piped text or null), and writes via ctx.out(text) / ctx.err(text)\n\
+             - Report errors through ctx.err plus ctx.exit(code) — never throw out of run\n\
+             - NO side effects at import time: no fetch, no DOM, no timers, no top-level\n\
+             state mutation — all work happens inside run()\n\
+             - Optional: mount demo documents via a files array ({ path, content }) under\n\
+             your own absolute prefix (/my-plugin/...); absolute https loading elsewhere in\n\
+             SemTextShell requires a sha256 integrity hash, so keep packs plain modules"
+        }
+        (_, AssetType::TextVideo) => {
+            "PROVIDER NOTES (VHS tape — charmbracelet vhs):\n\
+             - Emit a .tape script only — the vhs binary renders it to GIF; no HTML/JS\n\
+             - Start with Output \"demo.gif\" (with optional embed/resize variants), then\n\
+             Require for any external assets the demo needs\n\
+             - Style with the Settings/Typeset block: Theme, FontFamily, FontSize, Padding,\n\
+             Width, Height; tune pacing with Set TypingSpeed / Set Shell\n\
+             - Drive the session with Type \"…\", Enter, Sleep, and key presses (Ctrl+C, Tab,\n\
+             Alt+…) — one command per step, short Sleeps between steps so the GIF reads as\n\
+             a natural terminal demo\n\
+             - Set Width/Height explicitly for a crisp, shareable GIF"
         }
         _ => match channel {
             PrepChannel::Svg => {
@@ -1022,6 +1113,32 @@ mod tests {
     }
 
     #[test]
+    fn channel_new_chat_types() {
+        assert_eq!(
+            prep_channel(AssetType::CliToolMockup, AudioKind::Voice, None, "groq-chat"),
+            PrepChannel::Html
+        );
+        assert_eq!(
+            prep_channel(AssetType::JsShell, AudioKind::Voice, None, "groq-chat"),
+            PrepChannel::Code
+        );
+        // text_format overrides still apply on top of the type default.
+        assert_eq!(
+            prep_channel(AssetType::JsShell, AudioKind::Voice, Some("mjs"), "groq-chat"),
+            PrepChannel::Code
+        );
+        assert_eq!(
+            prep_channel(
+                AssetType::TextVideo,
+                AudioKind::Voice,
+                Some("tape"),
+                "groq-chat"
+            ),
+            PrepChannel::Diagram
+        );
+    }
+
+    #[test]
     fn voice_disallows_llm_prep() {
         assert!(!allows_llm_prep(PrepChannel::Voice));
         assert!(allows_llm_prep(PrepChannel::RasterImage));
@@ -1073,5 +1190,37 @@ mod tests {
         assert!(svg.to_lowercase().contains("svg"));
         let imagen = provider_prompt_guidance("gemini", AssetType::Image, None);
         assert!(imagen.contains("Imagen") || imagen.contains("hex codes"));
+    }
+
+    #[test]
+    fn static_guidance_cli_tool_mockup_carries_screens_grammar() {
+        let g = provider_prompt_guidance("groq-chat", AssetType::CliToolMockup, None);
+        assert!(g.contains("noizu-cli-mockup"));
+        assert!(g.contains("cdn.derobot.is"));
+        assert!(g.contains("@screen"));
+        // Canonical grammar lines must survive verbatim (alignment included).
+        assert!(g.contains("[[<label> -> #<target-id>]]"));
+        assert!(g.contains("[[<label> -> run:<command>]]"));
+        assert!(g.contains("[[<label> -> #<target-id>|run:<command>]]"));
+        assert!(g.contains(r"\[["));
+        assert!(g.contains("text/plain"));
+    }
+
+    #[test]
+    fn static_guidance_js_shell_contract() {
+        let g = provider_prompt_guidance("groq-chat", AssetType::JsShell, None);
+        assert!(g.contains("CommandSpec"));
+        assert!(g.contains("import time"));
+        assert!(g.contains("ctx.out"));
+    }
+
+    #[test]
+    fn static_guidance_text_video_tape_directives() {
+        let g = provider_prompt_guidance("groq-chat", AssetType::TextVideo, None);
+        assert!(g.contains("Output"));
+        assert!(g.contains("Settings") && g.contains("Typeset"));
+        assert!(g.contains("Type"));
+        assert!(g.contains("Require"));
+        assert!(g.to_lowercase().contains("vhs"));
     }
 }

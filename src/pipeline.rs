@@ -5,6 +5,7 @@ use crate::attachments::{load_attachments, validate_attachments};
 use crate::dag::topological_sort;
 use crate::eval::{evaluate_candidates, Evaluator};
 use crate::output::{genai_candidate_path, link_active, resolve_output_paths, write_metadata};
+use crate::preferences;
 use crate::prep::PromptPrepper;
 use crate::providers::{
     self, api_key_env, available, candidates_for, constraints, get_chat_provider, get_provider,
@@ -44,6 +45,8 @@ pub async fn run_generation(
     prompts: Vec<ParsedPrompt>,
     config: &PipelineConfig,
 ) -> color_eyre::Result<()> {
+    enforce_gemini_image_minimum(&prompts, config)?;
+
     // Validate attachments
     tel::step("Validating prompt files");
     for prompt in &prompts {
@@ -58,11 +61,25 @@ pub async fn run_generation(
 
     // Dependency sort
     tel::step("Resolving dependencies");
-    let sorted_prompts = topological_sort(prompts)?;
+    let mut sorted_prompts = topological_sort(prompts)?;
     tel::ok(&format!(
         "{} prompt(s) in generation order",
         sorted_prompts.len()
     ));
+
+    // Preference cascade (design §4.3) + snippet composition (§4.2).
+    //
+    // Applied here, once, *before* anything reads `meta.service` /
+    // `meta.model` / `meta.quality`, so every downstream selection site
+    // (`resolve_candidates`, `resolve_display_service`, the dry-run plan)
+    // honours it without each having to know the cascade exists. A
+    // rule-supplied `service` lands in `meta.service` and is therefore a pin,
+    // exactly like an inline `service:` field.
+    //
+    // With no config, or a config declaring neither `preferences:` nor
+    // `snippets:`, nothing is written and nothing is printed — today's output
+    // byte for byte.
+    apply_preference_cascade(&mut sorted_prompts, config);
 
     if config.verbose {
         for (i, p) in sorted_prompts.iter().enumerate() {
@@ -310,8 +327,9 @@ pub async fn run_generation(
                     .collect()
             };
             tel::fail_msg(&format!(
-                "No available providers for {} — missing API keys: {}",
+                "No available providers for {}{} — missing API keys: {}",
                 prompt.meta.id,
+                preference_clause(&prompt),
                 needed.join(", ")
             ));
             failed += paths.len();
@@ -571,7 +589,7 @@ pub async fn run_generation(
         if config.refine && succeeded > 0 {
             // Use actual service for refinement (first candidate's service)
             let refine_service = candidates[0].service;
-            let refine_model = candidates[0].model;
+            let refine_model = config.model_override.as_deref().unwrap_or(candidates[0].model);
             let refine_key = resolve_api_key(refine_service).unwrap_or_default();
 
             interactive_refine_loop(
@@ -579,6 +597,7 @@ pub async fn run_generation(
                 &path_results,
                 &refine_key,
                 refine_model,
+                refine_service,
                 config.verbose,
             )
             .await;
@@ -594,16 +613,52 @@ pub async fn run_generation(
     }
     tel::blank();
 
-    // Surface total failure as an error so lab jobs / CLI exit codes reflect reality.
-    // (Previously always Ok(()) even when every candidate 404'd — UI showed "Done" with 0 files.)
-    if succeeded == 0 && failed > 0 {
+    run_outcome(succeeded, failed, &post_failures)
+}
+
+/// Exit-code decision for a completed run.
+///
+/// **A partial failure is a failure.** If any output failed, the process exits
+/// non-zero — standard tooling behaviour, and the only way a caller scripting
+/// this tool can tell that something did not get made.
+///
+/// This gate previously fired only on `succeeded == 0 && failed > 0`, so a
+/// batch where some prompts succeeded and others failed returned `Ok(())` and
+/// exited 0, silently swallowing the failures. The preference cascade makes
+/// that shape materially more likely: a `preferences:` rule can pin a provider
+/// the prompt file never names, and a missing key for it fails only that
+/// prompt while the rest of the batch routes elsewhere and succeeds.
+///
+/// The total-failure message is unchanged, so runs that already exited
+/// non-zero report exactly what they reported before.
+///
+/// Post-processing failures stay fatal exactly as they were on `develop`
+/// before the cascade work: `run_generation` tracks them in `post_failures`
+/// and they gate the outcome here — including the case where every
+/// generation succeeded but a post-step failed.
+fn run_outcome(
+    succeeded: usize,
+    failed: usize,
+    post_failures: &[String],
+) -> color_eyre::Result<()> {
+    if failed == 0 {
+        if !post_failures.is_empty() {
+            color_eyre::eyre::bail!(
+                "Post-processing failed ({} step(s)):\n  - {}\n\
+                 Pass --allow-unimplemented-post to downgrade unimplemented actions to warnings.",
+                post_failures.len(),
+                post_failures.join("\n  - ")
+            );
+        }
+        return Ok(());
+    }
+    if succeeded == 0 {
         color_eyre::eyre::bail!(
             "Generation failed: 0 outputs written ({} attempt(s) failed). \
              Check API keys and model names (Groq default: openai/gpt-oss-120b).",
             failed
         );
     }
-
     if !post_failures.is_empty() {
         color_eyre::eyre::bail!(
             "Post-processing failed ({} step(s)):\n  - {}\n\
@@ -613,12 +668,108 @@ pub async fn run_generation(
         );
     }
 
-    Ok(())
+    color_eyre::eyre::bail!(
+        "Generation partially failed: {} of {} output(s) failed, {} written. \
+         Check API keys and model names (Groq default: openai/gpt-oss-120b).",
+        failed,
+        succeeded + failed,
+        succeeded
+    );
 }
 
 // ---------------------------------------------------------------------------
 // Candidate resolution
 // ---------------------------------------------------------------------------
+
+/// Clause naming the `preferences:` rule that pinned a prompt's service, for
+/// failure messages. Empty when the service did not come from the cascade, so
+/// messages for prompt-file pins and auto-selection stay byte-for-byte unchanged.
+///
+/// A cascade-pinned service deliberately does not fall back to the quality
+/// ladder: provider choice here is an aesthetic decision, not a capacity one,
+/// and silently substituting a provider yields art that does not match what the
+/// author asked for. That makes a missing key fatal for the prompt, so the
+/// message has to name the rule or the user has no route back to the cause.
+fn preference_clause(prompt: &ParsedPrompt) -> String {
+    match prompt.meta.service_provenance {
+        Some(ref selector) => format!(" — selected by preference rule \"{selector}\""),
+        None => String::new(),
+    }
+}
+
+/// Per-run CLI/GUI override layer (cascade rank 5) derived from [`PipelineConfig`].
+// ⟦𓅃𓈍𓂘𓋘⟧ cli_overrides :: Per-run CLI/GUI override layer for the preference cascade.
+pub fn cli_overrides(config: &PipelineConfig) -> preferences::Overrides {
+    preferences::Overrides {
+        service: config.service_override.clone(),
+        model: config.model_override.clone(),
+        quality: config.quality_override.map(|q| q.as_str().to_string()),
+        // There is no `--snippets` flag; the GUI supplies this layer instead.
+        snippets: None,
+    }
+}
+
+/// Resolve and fold the preference cascade into every prompt in the batch.
+///
+/// Emission goes through [`crate::telemetry`], not `ui::*` directly: the warn
+/// lines ride the presentation channel and the applied settings also ride the
+/// typed `media_tool::progress` channel, so a GUI learns that a run's provider
+/// was chosen by config rather than by the prompt file.
+fn apply_preference_cascade(prompts: &mut [ParsedPrompt], config: &PipelineConfig) {
+    let prefs = preferences::PreferenceSet::from_config(crate::provider_config::loaded());
+    for err in &prefs.errors {
+        tel::warn_msg(&format!(
+            "media-tool config: ignoring preference `{}` \u{2014} {}",
+            err.selector, err.message
+        ));
+    }
+    let cli = cli_overrides(config);
+    for prompt in prompts.iter_mut() {
+        let facts = preferences::PromptFacts::from_prompt(prompt, config.quality_override);
+        let file = preferences::file_overrides(prompt);
+        let resolution = preferences::resolve(&prefs, &facts, &file, &cli);
+        let applied = preferences::apply(prompt, &resolution, &prefs);
+
+        for name in &applied.missing_snippets {
+            tel::warn_msg(&format!(
+                "{}: unknown snippet `{}` \u{2014} not defined under `snippets:`",
+                prompt.meta.id, name
+            ));
+        }
+        if applied.is_empty() {
+            continue;
+        }
+
+        progress::preferences_applied(
+            &prompt.meta.id,
+            applied.service.as_deref().unwrap_or(""),
+            applied.model.as_deref().unwrap_or(""),
+            applied.quality.map(|q| q.as_str()).unwrap_or(""),
+            applied.snippets.len(),
+        );
+
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(ref svc) = applied.service {
+            parts.push(format!("service={svc}"));
+        }
+        if let Some(ref model) = applied.model {
+            parts.push(format!("model={model}"));
+        }
+        if let Some(q) = applied.quality {
+            parts.push(format!("quality={}", q.as_str()));
+        }
+        if !applied.snippets.is_empty() {
+            parts.push(format!("snippets=[{}]", applied.snippets.join(", ")));
+        }
+        if !parts.is_empty() {
+            tel::info(&format!(
+                "{}: preferences \u{2192} {} (run `explain` for provenance)",
+                prompt.meta.id,
+                parts.join(", ")
+            ));
+        }
+    }
+}
 
 fn resolve_candidates(
     config: &PipelineConfig,
@@ -639,6 +790,13 @@ fn resolve_candidates(
             service: svc_static,
             model: model_static,
         }];
+    }
+
+    // A selected text profile overrides prompt-file defaults, but not --service.
+    if prompt.meta.asset_type.is_chat_type() {
+        if let Some(candidate) = crate::llm_profiles::selected_candidate() {
+            return vec![candidate];
+        }
     }
 
     // Priority 2: YAML service: pinned
@@ -674,6 +832,15 @@ fn resolve_display_service(
             .unwrap_or_else(|| providers::default_model(svc))
             .to_string();
         return (svc.clone(), model);
+    }
+
+    if prompt.meta.asset_type.is_chat_type() {
+        if let Some(p) = crate::llm_profiles::selected() {
+            return (
+                crate::llm_profiles::PROFILE_SERVICE.into(),
+                config.model_override.as_deref().unwrap_or(&p.model).into(),
+            );
+        }
     }
 
     if let Some(ref svc) = prompt.meta.service {
@@ -740,7 +907,8 @@ fn effective_text_format(prompt: &ParsedPrompt) -> Option<&str> {
         .filter(|f| {
             matches!(
                 f.to_lowercase().as_str(),
-                "svg"
+                "xml"
+                    | "svg"
                     | "mmd"
                     | "mermaid"
                     | "puml"
@@ -769,6 +937,9 @@ fn text_inference_system_prompt(
     }
 
     let mut sections = Vec::new();
+    if prompt.meta.asset_type == AssetType::Component {
+        sections.push("Component framework policy: Default to a Lit web component (LitElement with TypeScript), unless the user's prompt, output format or system instructions explicitly request React/JSX/TSX. Follow explicit framework requests. Return only the requested source code.".to_string());
+    }
     if let Some(solution) = crate::fim::guidance_for(
         svc,
         prompt.meta.asset_type,
@@ -829,8 +1000,11 @@ async fn run_eval_gated(
         let api_key = resolve_api_key(svc).unwrap_or_default();
         if api_key.is_empty() {
             tel::warn_msg(&format!(
-                "{} not set — skipping {} ({} provider)",
-                env_name, prompt.meta.id, svc
+                "{} not set — skipping {} ({} provider){}",
+                env_name,
+                prompt.meta.id,
+                svc,
+                preference_clause(prompt)
             ));
             continue;
         }
@@ -1052,6 +1226,11 @@ async fn run_eval_gated(
                 None,
                 None,
                 &prompt.payload.prompt.provider_options,
+                Some(&crate::output::EvalMeta {
+                    attempt: Some(attempt + 1),
+                    verdict: None,
+                    score: None,
+                }),
             );
 
             // Score (pass duration for structural/hybrid audio-video checks)
@@ -1112,6 +1291,11 @@ async fn run_eval_gated(
                         Some(w),
                         Some(&s.notes),
                         &prompt.payload.prompt.provider_options,
+                        Some(&crate::output::EvalMeta::from_score(
+                            attempt + 1,
+                            s.passes(eval_section),
+                            &s,
+                        )),
                     );
 
                     if config.verbose {
@@ -1281,8 +1465,11 @@ async fn run_legacy_variants(
     let api_key = resolve_api_key(svc).unwrap_or_default();
     if api_key.is_empty() {
         tel::warn_msg(&format!(
-            "{} not set — skipping {} ({} provider)",
-            env_name, prompt.meta.id, svc
+            "{} not set — skipping {} ({} provider){}",
+            env_name,
+            prompt.meta.id,
+            svc,
+            preference_clause(prompt)
         ));
         progress::output_completed(
             &prompt_id,
@@ -1297,6 +1484,8 @@ async fn run_legacy_variants(
     let options = build_options(candidate.model, prompt, config);
 
     let mut variant_paths: Vec<PathBuf> = Vec::new();
+    let mut variant_gens: Vec<GenerationInputs> = Vec::new();
+    let mut variant_models: Vec<String> = Vec::new();
     for v in 0..config.variant_count {
         let attempt_span = progress::attempt_span(
             &prompt_id,
@@ -1405,6 +1594,7 @@ async fn run_legacy_variants(
                 candidate.model,
                 &gen,
                 &prompt.payload.prompt.provider_options,
+                None,
             );
             progress::attempt_completed(
                 &prompt_id,
@@ -1415,6 +1605,8 @@ async fn run_legacy_variants(
                 progress::NO_SCORE,
             );
             variant_paths.push(genai_path);
+            variant_gens.push(gen);
+            variant_models.push(candidate.model.to_string());
         } else {
             progress::attempt_failed(
                 &prompt_id,
@@ -1448,27 +1640,57 @@ async fn run_legacy_variants(
         let refs: Vec<&std::path::Path> = variant_paths.iter().map(|p| p.as_path()).collect();
 
         if let Some(ev) = evaluator {
-            // Use LM Studio evaluator for best-of-N selection
-            let mut best_i = 0usize;
-            let mut best_score = -1.0f64;
-            let dummy_eval = crate::schema::EvalSection::default();
-            for (i, p) in refs.iter().enumerate() {
-                if let Some(score) = ev
-                    .score_output(p, &prompt.payload.prompt.text, &dummy_eval, config.verbose)
-                    .await
-                {
-                    if score.weighted > best_score {
-                        best_score = score.weighted;
-                        best_i = i;
-                    }
-                }
-            }
+            // Score against the prompt's own eval block when it has one, else
+            // the asset-type default. The old behavior scored against
+            // `EvalSection::default()` — no criteria, every weighted score
+            // 0.0, candidate 1 always "won".
+            let legacy_eval = prompt
+                .payload
+                .eval
+                .clone()
+                .unwrap_or_else(crate::eval::default_eval_for_type);
+            let (best_i, scores) = crate::eval::select_best_candidate(
+                &refs,
+                &prompt.payload.prompt.text,
+                &legacy_eval,
+                ev,
+                config.verbose,
+            )
+            .await;
+            let best_score = scores
+                .get(best_i)
+                .and_then(|s| s.as_ref())
+                .map(|s| s.weighted);
             tel::info(&format!(
-                "Selected candidate {} of {} (score={:.3})",
+                "Selected candidate {} of {} (score={})",
                 best_i + 1,
                 variant_paths.len(),
                 best_score
+                    .map(|w| format!("{:.3}", w))
+                    .unwrap_or_else(|| "n/a".into())
             ));
+            // Refresh each variant's sidecar with its eval outcome.
+            for (i, p) in variant_paths.iter().enumerate() {
+                let meta = match scores.get(i).and_then(|s| s.as_ref()) {
+                    Some(s) => crate::output::EvalMeta::from_score(i + 1, s.passes(&legacy_eval), s),
+                    None => crate::output::EvalMeta {
+                        attempt: Some(i + 1),
+                        verdict: None,
+                        score: None,
+                    },
+                };
+                write_variant_metadata(
+                    p,
+                    svc,
+                    variant_models
+                        .get(i)
+                        .map(|m| m.as_str())
+                        .unwrap_or("unknown"),
+                    &variant_gens[i],
+                    &prompt.payload.prompt.provider_options,
+                    Some(&meta),
+                );
+            }
             best_i
         } else {
             // Groq fallback
@@ -1645,6 +1867,7 @@ fn write_variant_metadata(
     model: &str,
     gen: &GenerationInputs,
     provider_options: &HashMap<String, serde_yaml::Value>,
+    eval_meta: Option<&crate::output::EvalMeta<'_>>,
 ) {
     write_metadata(
         genai_path,
@@ -1655,6 +1878,7 @@ fn write_variant_metadata(
         None,
         None,
         provider_options,
+        eval_meta,
     );
 }
 
@@ -1668,6 +1892,42 @@ fn write_variant_metadata(
 fn format_provider_options(options: &HashMap<String, serde_yaml::Value>) -> String {
     let ordered: BTreeMap<&String, &serde_yaml::Value> = options.iter().collect();
     format!("{:?}", ordered)
+}
+
+/// Reject Gemini image models below the supported generation before prep, eval, dry-run,
+/// or any paid call.
+///
+/// Defaulting to a current model is not the same as enforcing a minimum: a caller can still
+/// name an older model in the prompt file, on the CLI (`--model`), in a `media-tool.yaml`
+/// fallback tier, or via the `generate_content_model` provider option. Every one of those
+/// routes lands in the resolved candidate list, so that is what is checked here.
+/// [`providers::gemini::GeminiProvider::generate`] re-validates for callers that bypass
+/// this pipeline.
+fn enforce_gemini_image_minimum(
+    prompts: &[ParsedPrompt],
+    config: &PipelineConfig,
+) -> color_eyre::Result<()> {
+    for prompt in prompts {
+        if prompt.meta.asset_type != AssetType::Image {
+            continue;
+        }
+        let quality = config.quality_override.unwrap_or(prompt.meta.quality);
+        let candidates = if config.service_override.is_some() || prompt.meta.service.is_some() {
+            resolve_candidates(config, prompt, quality)
+        } else {
+            candidates_for(prompt.meta.asset_type, prompt.meta.audio_kind, quality)
+        };
+        for candidate in candidates {
+            if candidate.service == "gemini" {
+                providers::gemini::validate_image_options(&build_options(
+                    candidate.model,
+                    prompt,
+                    config,
+                ))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1688,6 +1948,95 @@ mod tests {
         dir
     }
 
+    // -- run_outcome: a partial failure is a failure ------------------------
+
+    #[test]
+    fn a_clean_run_succeeds() {
+        assert!(run_outcome(3, 0, &[]).is_ok());
+        assert!(run_outcome(0, 0, &[]).is_ok());
+    }
+
+    #[test]
+    fn a_total_failure_errors_with_the_unchanged_message() {
+        let err = run_outcome(0, 2, &[]).unwrap_err().to_string();
+        assert!(err.contains("0 outputs written"), "{err}");
+        assert!(err.contains("2 attempt(s) failed"), "{err}");
+    }
+
+    /// The bug this gate had: a mixed batch returned `Ok(())` and exited 0,
+    /// silently swallowing the failed prompt. The preference cascade makes this
+    /// shape likely — a rule pins a provider the prompt file never names, its
+    /// key is unset, and the rest of the batch succeeds.
+    #[test]
+    fn a_mixed_batch_with_any_failure_errors() {
+        let err = run_outcome(1, 1, &[]).unwrap_err().to_string();
+        assert!(err.contains("partially failed"), "{err}");
+        assert!(err.contains("1 of 2 output(s) failed"), "{err}");
+        assert!(err.contains("1 written"), "{err}");
+
+        // and it must hold for every mixed shape, not just 1/1
+        for (ok, bad) in [(1usize, 5usize), (5, 1), (9, 9)] {
+            assert!(
+                run_outcome(ok, bad, &[]).is_err(),
+                "{ok} succeeded / {bad} failed must be an error"
+            );
+        }
+    }
+
+    /// End-to-end over the real failure path, offline: a cascade-pinned service
+    /// whose key is unset is skipped at the `api_key.is_empty()` branch, which
+    /// `continue`s before any HTTP call. Both prompts fail, so this exercises
+    /// the plumbing from `run_generation` through to a non-zero outcome.
+    ///
+    /// The *mixed* case cannot be reached offline — a genuine success needs a
+    /// real provider call — so the success side is covered by `run_outcome`
+    /// above rather than end to end.
+    #[tokio::test]
+    async fn a_batch_that_wholly_fails_on_missing_keys_returns_err() {
+        let dir = scratch_dir("missing-keys");
+        let mut prompts = Vec::new();
+        for id in ["alpha", "beta"] {
+            let path = dir.join(format!("{id}.media.prompt"));
+            std::fs::write(
+                &path,
+                format!(
+                    "schema: \"0.4\"\nid: {id}\ntype: image\n\
+                     service: gemini\nprompt:\n  text: \"a test\"\n\
+                     output:\n  formats:\n    - format: png\n"
+                ),
+            )
+            .unwrap();
+            prompts.push(crate::schema::parse_prompt_file(&path).unwrap());
+        }
+
+        // Guarantee the key is absent for this process.
+        std::env::remove_var("GEMINI_API_KEY");
+        std::env::remove_var("GOOGLE_API_KEY");
+
+        let config = PipelineConfig {
+            variant_count: 1,
+            dry_run: false,
+            force: true,
+            model_override: None,
+            verbose: false,
+            refine: false,
+            quality_override: None,
+            service_override: None,
+            no_eval: true,
+            no_prep: true,
+            fim_enabled: false,
+            eval_url: None,
+            eval_model: None,
+            // Field added on develop after this branch forked; the test does
+            // not exercise post-processing, so the strict default applies.
+            allow_unimplemented_post: false,
+        };
+
+        let result = run_generation(prompts, &config).await;
+        assert!(result.is_err(), "missing keys must not exit 0");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Bug 1 regression: when the LLM prepper replaces the declared negative, the
     /// sidecar must record the negative that was actually sent to the provider.
     #[test]
@@ -1703,7 +2052,7 @@ mod tests {
 
         let dir = scratch_dir("sidecar");
         let asset = dir.join("asset.png");
-        write_variant_metadata(&asset, "gemini", "some-model", &gen, &HashMap::new());
+        write_variant_metadata(&asset, "gemini", "some-model", &gen, &HashMap::new(), None);
 
         let sidecar = std::fs::read_to_string(asset.with_extension("metadata.yaml")).unwrap();
         assert!(
@@ -1725,7 +2074,7 @@ mod tests {
         let gen = GenerationInputs::new("text".to_string(), Some("declared".to_string()));
         let dir = scratch_dir("sidecar-declared");
         let asset = dir.join("asset.png");
-        write_variant_metadata(&asset, "gemini", "some-model", &gen, &HashMap::new());
+        write_variant_metadata(&asset, "gemini", "some-model", &gen, &HashMap::new(), None);
         let sidecar = std::fs::read_to_string(asset.with_extension("metadata.yaml")).unwrap();
         assert!(sidecar.contains("declared"));
         let _ = std::fs::remove_dir_all(&dir);

@@ -49,6 +49,128 @@ pub struct ProviderConfig {
     /// (overrides fim.rs provider_solution mapping, e.g. gemini: providers/gemini-image.md).
     #[serde(default)]
     pub prompt_guidance: BTreeMap<String, String>,
+    /// Design §4.3 — CSS-style preference cascade: selector -> overrides.
+    ///
+    /// Held as a raw `serde_yaml::Mapping` rather than a typed map because
+    /// **declaration order is load-bearing** (ties at equal specificity go to
+    /// the later rule) and `serde_yaml::Mapping` is the only ordered container
+    /// available without a new dependency. Parsed into typed rules by
+    /// [`crate::preferences::PreferenceSet::from_config`], which skips and
+    /// reports malformed entries instead of failing the whole config.
+    #[serde(default)]
+    pub preferences: serde_yaml::Mapping,
+    /// Design §4.2 — named house-style prompt fragments, referenced by name
+    /// from a `preferences:` rule or a prompt file's `snippets:` list and
+    /// composed into `prompt.system`.
+    #[serde(default)]
+    pub snippets: BTreeMap<String, String>,
+    /// Design §4.4 — open type registry entries.
+    ///
+    /// Parsed and exposed here so a config carrying them round-trips and can be
+    /// inspected, but **not yet consumed**: §4.4 assigns registry-driven
+    /// routing (choke points 5-7) and the `types.d/` search path to phase 0c.
+    /// Only the config-resident `types:` mapping shown in §4.4 is read; the
+    /// packaged and per-user `types.d/*.yaml` directories are out of scope here.
+    #[serde(default)]
+    pub types: BTreeMap<String, TypeEntry>,
+    /// Decision-judge (grading) overrides: backend, model, base URL and the
+    /// ordered credential sources. Absent fields defer to backend defaults —
+    /// see `crate::judge::JudgeConfig::resolve`.
+    #[serde(default)]
+    pub judge: JudgeSection,
+    /// Prep/eval inference (qwen3.8-flash by default) and the vision observer
+    /// used by the observe -> decide judge path. See `crate::inference`.
+    #[serde(default)]
+    pub inference: InferenceSection,
+}
+
+/// `inference:` config section — the text LLM that distills/refines prompts and
+/// the vision model that observes generated artifacts for the decision judge.
+///
+/// ```yaml
+/// inference:
+///   model: qwen3.8-flash                # prep/eval chat model
+///   base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1  # literal override
+///   key:                                # ordered sources, first usable hit wins
+///     - env: QWEN_API_KEY
+///     - dc: { subject: services, key: apps.npl_mcp_qwen_api_key }
+///   observer_models:                    # vision chain for image/video judging
+///     - qwen3.8-flash                   # first model that actually answers wins
+///     - qwen-vl-plus
+/// ```
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct InferenceSection {
+    /// Prep/eval chat model (default `qwen3.8-flash`).
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Literal base URL — replaces the env/dc base resolution chain.
+    #[serde(default)]
+    pub base: Option<String>,
+    /// Ordered credential sources (see `crate::secrets::SecretSource`).
+    #[serde(default)]
+    pub key: Option<Vec<crate::secrets::SecretSource>>,
+    /// Vision-observer model chain for the observe -> decide judge path, best
+    /// first. The first model that answers with content wins; absent fields
+    /// defer to the compiled-in chain (empirically probed, see
+    /// `docs/quality-selection-and-eval.md`).
+    #[serde(default)]
+    pub observer_models: Option<Vec<String>>,
+}
+
+/// `judge:` config section — overrides for the decision-model judge.
+///
+/// ```yaml
+/// judge:
+///   backend: alibaba        # alibaba | jev (default alibaba)
+///   model: decision-model-preview
+///   base: https://workspace.example/compatible-mode/v1   # literal override
+///   key:                    # ordered sources, first usable hit wins
+///     - env: QWEN_API_KEY
+///     - dc: { subject: services, key: apps.npl_mcp_qwen_api_key }
+/// ```
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct JudgeSection {
+    /// `alibaba` | `jev`.
+    #[serde(default)]
+    pub backend: Option<String>,
+    /// Judge model id (backend default: `decision-model-preview` / `jev-latest`).
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Literal base URL — replaces the env/dc base resolution chain.
+    #[serde(default)]
+    pub base: Option<String>,
+    /// Ordered credential sources (see `crate::secrets::SecretSource`).
+    #[serde(default)]
+    pub key: Option<Vec<crate::secrets::SecretSource>>,
+    /// Distribution policy: `strict` (exact Σp·i equality, the reference
+    /// contract) or `rounded` (hundredths-grid policy). Absent = auto-gated
+    /// (rounded for decision-model-preview and jev-* models, strict others).
+    #[serde(default)]
+    pub policy: Option<String>,
+}
+
+/// A single design §4.4 type-registry entry. Parsed, not yet routed (phase 0c).
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+pub struct TypeEntry {
+    /// `text` | `media` | `render` | `compose` — the closed modality set.
+    #[serde(default)]
+    pub modality: Option<String>,
+    #[serde(default)]
+    pub extension: Option<String>,
+    #[serde(default)]
+    pub text_format: Option<String>,
+    #[serde(default)]
+    pub default_service: Option<String>,
+    #[serde(default)]
+    pub system: Option<String>,
+    #[serde(default)]
+    pub validate: Vec<String>,
+    /// For `modality: render` — the intermediate text format the LLM writes.
+    #[serde(default)]
+    pub via: Option<String>,
+    /// For `modality: render` — the converter that turns `via` into `extension`.
+    #[serde(default)]
+    pub renderer: Option<String>,
 }
 
 static CONFIG: OnceLock<Option<ProviderConfig>> = OnceLock::new();

@@ -10,11 +10,12 @@ media-tool generates media assets from declarative YAML `.media.prompt` files (s
 - `main.rs` — CLI entry, input resolution, dispatch
 - `schema.rs` — YAML parsing, legacy v0.1–v0.3 normalization
 - `provider_config.rs` — runtime `media-tool.yaml` overrides (defaults, tiers, limits)
+- `preferences.rs` — CSS-style preference cascade (selector → field patches, full provenance) + snippet library; backs `explain`
 - `structural.rs` — markup format detection/normalization
 - `dag.rs` — dependency DAG, cycle detection, Kahn's tiering
 - `pipeline.rs` — orchestration, dry-run, quality→provider selection
 - `providers/` — 16 implementations: image (Gemini Imagen, Qwen image, DashScope, ZAI), music/SFX (Suno), TTS (OpenAI, ElevenLabs, Qwen), video (Grok, Veo, Wan), chat (Gemini, Anthropic, OpenAI, Groq, OpenRouter, LiteLLM/ZAI)
-- `renderers/` — Mermaid, PlantUML, Graphviz, Puppeteer (markup → visual)
+- `renderers/` — Mermaid, PlantUML, Graphviz, Puppeteer, VHS (markup → visual)
 - `postprocess.rs` + `imagefmt.rs` — crop/resize post-processing; image format reconciliation by magic number
 - `telemetry.rs` + `term_layer.rs` — tracing-event progress; CLI terminal subscriber
 - `test_lab/` — local browser lab server (catalog, settings, workspace persistence)
@@ -27,7 +28,11 @@ media-tool generates media assets from declarative YAML `.media.prompt` files (s
 
 ## Provider Architecture
 
-Three categories dispatched via `MediaProvider` trait registry: media APIs (binary output), chat-completion APIs (text/code), and local renderers (post-generation markup → visual). Model defaults, tier ladders, and prompt limits overridable at runtime via `media-tool.yaml` (local file or URL) without rebuilding. New provider = trait impl + registration.
+Three categories dispatched via `MediaProvider` trait registry: media APIs (binary output), chat-completion APIs (text/code), and local renderers (post-generation markup → visual). Model defaults, tier ladders, and prompt limits overridable at runtime via `media-tool.yaml` (local file or URL) without rebuilding. Image generation enforces a Gemini 3 minimum (2.x ids and unversioned aliases rejected before any API call; `models` subcommand prints the catalog offline). New provider = trait impl + registration.
+
+## Prompt Model & Preference Cascade
+
+Intent in the prompt file (`type`, `quality`, text, eval) is completed by `preferences.rs`: selector rules (`*` < `type:` < `type:[attr]`/`tag:` < `id:` < file field < CLI flag) patch `service`/`model`/`quality` field-by-field, later rule winning ties. The resolver is pure and returns provenance, so `explain` and the GUI read what generation used. `snippets:` compose house-style text into `prompt.system`. Types: media (image, audio/voice/music/sfx, video) plus chat-generated component, react-page, html, style-guide, diagram, document, cli-tool-mockup, js-shell, text-video.
 
 ## Generation Flow
 
@@ -53,10 +58,12 @@ Parse/normalize → resolve depends_on DAG (cycles abort) → generate tier by t
 
 - Rust rewrite for single binary + TUI + async polling; Python engine as fallback only
 - Declarative YAML with quality tiers instead of provider pinning
+- CSS-style preference cascade with provenance instead of per-prompt pinning
 - Runtime config layer (`media-tool.yaml`) so model/tier changes need no rebuild
+- Gemini 3 minimum gated on the image path only, before any API call
 - Cross-file dependency DAG as first-class batch model
 - Eval-gated generation with graceful degradation when no evaluator reachable
-- Renderers as post-transforms, separate from generation providers
+- Renderers as post-transforms, separate from generation providers (VHS is a soft dependency — skips with guidance)
 - Library-first split (`lib.rs`/`orchestrator.rs`/`telemetry.rs`) so CLI, test lab, and macOS app share one engine
 - Unknown post-processing actions fail the run (`--allow-unimplemented-post` downgrades)
 

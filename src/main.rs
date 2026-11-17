@@ -1,3 +1,4 @@
+// 〚📁:4b600fdf-99c0-5ed5-bb42-8ff1211ae438〛 media-tool CLI entry :: clap shell — input resolution, subcommand dispatch, terminal rendering, exit codes.
 //! CLI shell for the media-tool library.
 //!
 //! This binary owns only CLI concerns: clap parsing, terminal rendering (dialoguer prompts,
@@ -8,6 +9,8 @@
 //! [`term_layer::TermLayer`], which renders those events through `ui::*` exactly as the
 //! library used to print them itself.
 
+mod llm_cli;
+mod llm_tui;
 mod term_layer;
 
 use std::path::{Path, PathBuf};
@@ -57,6 +60,10 @@ struct Cli {
     #[arg(long)]
     refine: bool,
 
+    /// Named LLM profile (overrides MEDIA_TOOL_LLM_PROFILE and stored default)
+    #[arg(long, global = true, value_name = "NAME")]
+    llm_profile: Option<String>,
+
     /// Override generation model
     #[arg(long)]
     model: Option<String>,
@@ -100,6 +107,53 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Open a native document in a read-only browser review host
+    View {
+        path: PathBuf,
+        #[arg(long = "type")] kind: Option<String>,
+        #[arg(long, default_value_t = 0)] port: u16,
+        #[arg(long)] no_open: bool,
+    },
+    /// Configure and use named local/cloud LLM profiles
+    Llm {
+        #[command(subcommand)]
+        command: llm_cli::LlmCommand,
+    },
+    /// Explain how the preference cascade resolves for a prompt file
+    Explain {
+        /// The .media.prompt file to explain
+        #[arg(value_name = "PROMPT_FILE")]
+        prompt: PathBuf,
+        /// Quality tier override applied before resolution: low|medium|high
+        #[arg(long, value_name = "TIER")]
+        quality: Option<String>,
+        /// Pin provider service (the `!important` layer)
+        #[arg(long, value_name = "SVC")]
+        service: Option<String>,
+        /// Override generation model (the `!important` layer)
+        #[arg(long, value_name = "ID")]
+        model: Option<String>,
+    },
+    /// List documented Gemini image models and the minimum-version policy (offline)
+    Models,
+    /// Grade a generated output against the prompt's eval rubric (decision judge)
+    Judge {
+        /// The .media.prompt file whose eval section defines the rubric
+        #[arg(value_name = "PROMPT_FILE")]
+        prompt: PathBuf,
+        /// Generated output file to grade (svg/html/txt/md/code only)
+        #[arg(long, value_name = "PATH")]
+        output: PathBuf,
+        /// Judge backend: alibaba|jev (default: judge config or alibaba)
+        #[arg(long, value_name = "BACKEND")]
+        judge: Option<String>,
+        /// Judge model override (default: decision-model-preview / jev-latest)
+        #[arg(long, value_name = "ID")]
+        judge_model: Option<String>,
+        /// Emit machine-readable JSON instead of the human summary
+        #[arg(long)]
+        json: bool,
+    },
     /// Interactive web lab: browse types, generate, view, and eval media
     Lab {
         /// Listen port (default 8787)
@@ -136,24 +190,99 @@ async fn main() -> color_eyre::Result<()> {
     install_terminal_subscriber();
     let cli = Cli::parse();
 
+    if matches!(cli.command, Some(Commands::Models)) {
+        println!("{}", media_tool::providers::gemini::IMAGE_MODELS);
+        return Ok(());
+    }
+
+    if let Some(Commands::Llm { command }) = cli.command {
+        return llm_cli::run(command, cli.llm_profile.as_deref(), cli.model.as_deref()).await;
+    }
+
+    if let Some(Commands::View { path, kind, port, no_open }) = cli.command {
+        return media_tool::review::run(path, kind, port, !no_open).await;
+    }
+
     // Load .envrc.k8.dc for API keys (GEMINI, SUNO, OPENAI, ELEVENLABS, DASHSCOPE)
     orchestrator::load_envrc();
 
     // Load runtime provider/model overrides (local or remote YAML)
     provider_config::init().await;
+    media_tool::llm_profiles::init(cli.llm_profile.as_deref())?;
 
-    if let Some(Commands::Lab {
-        port,
-        demos,
-        workspace,
-        open,
-        no_open,
-        verbose,
-    }) = cli.command
-    {
-        let open_browser = open && !no_open;
-        let cfg = test_lab::LabConfig::resolve(port, demos, workspace, verbose, open_browser)?;
-        return test_lab::run_lab(cfg).await;
+    match cli.command {
+        Some(Commands::Judge {
+            prompt,
+            output,
+            judge: backend,
+            judge_model,
+            json,
+        }) => {
+            let verdict = media_tool::judge::run_cli(
+                &prompt,
+                &output,
+                backend.as_deref(),
+                judge_model.as_deref(),
+            )
+            .await;
+            match verdict {
+                Ok(verdict) => {
+                    if json {
+                        println!("{}", verdict.to_json_pretty());
+                    } else {
+                        print!("{}", verdict.render_human());
+                    }
+                    return Ok(());
+                }
+                Err(err)
+                    if err
+                        .downcast_ref::<media_tool::judge::ObserveRequired>()
+                        .is_some() =>
+                {
+                    // Audio has no observation path (image/video are observed then judged).
+                    let kind = err
+                        .downcast_ref::<media_tool::judge::ObserveRequired>()
+                        .map(|o| o.0)
+                        .unwrap_or("this output kind");
+                    ui::fail_msg(&format!(
+                        "judge: {kind} outputs cannot be judged (no observation path — image/video are observed then decided; audio is unsupported)"
+                    ));
+                    std::process::exit(2);
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        Some(Commands::Lab {
+            port,
+            demos,
+            workspace,
+            open,
+            no_open,
+            verbose,
+        }) => {
+            let open_browser = open && !no_open;
+            let cfg = test_lab::LabConfig::resolve(port, demos, workspace, verbose, open_browser)?;
+            return test_lab::run_lab(cfg).await;
+        }
+        Some(Commands::Explain {
+            prompt,
+            quality,
+            service,
+            model,
+        }) => {
+            let config = PipelineConfig {
+                quality_override: orchestrator::parse_quality_override(quality.as_deref())?,
+                service_override: service,
+                model_override: model,
+                ..explain_defaults()
+            };
+            return orchestrator::explain_prompt(&prompt, &config);
+        }
+        // Offline command, handled above before env/provider init.
+        Some(Commands::View { .. }) => unreachable!("View handled before provider init"),
+        Some(Commands::Llm { .. }) => unreachable!("LLM commands handled before provider init"),
+        Some(Commands::Models) => unreachable!("`models` is handled before provider init"),
+        None => {}
     }
 
     if cli.variants < 1 {
@@ -246,6 +375,29 @@ fn install_terminal_subscriber() {
     let _ = tracing_subscriber::registry()
         .with(term_layer::TermLayer)
         .try_init();
+}
+
+/// Inert [`PipelineConfig`] for `explain`: nothing here is read by the cascade,
+/// which only consults `quality_override`, `service_override` and `model_override`.
+fn explain_defaults() -> PipelineConfig {
+    PipelineConfig {
+        variant_count: 1,
+        dry_run: true,
+        force: false,
+        model_override: None,
+        verbose: false,
+        refine: false,
+        quality_override: None,
+        service_override: None,
+        no_eval: true,
+        no_prep: true,
+        fim_enabled: false,
+        eval_url: None,
+        eval_model: None,
+        // develop added this field after the branch forked; the explain path
+        // never runs the pipeline, so the strict default is the inert choice.
+        allow_unimplemented_post: false,
+    }
 }
 
 fn report_input_issues(issues: &[InputIssue]) {
@@ -386,6 +538,9 @@ fn append_worker_args(command: &mut Command, cli: &Cli) {
     }
     if let Some(model) = &cli.model {
         command.arg("--model").arg(model);
+    }
+    if let Some(profile) = &cli.llm_profile {
+        command.arg("--llm-profile").arg(profile);
     }
     if cli.verbose {
         command.arg("--verbose");

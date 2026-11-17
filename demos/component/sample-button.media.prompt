@@ -5,24 +5,27 @@ quality: medium
 
 prompt:
   system: |
-    Output ONLY valid TypeScript React code. No markdown fences. Export a named Button component.
+    Output ONLY a TypeScript Lit web component module. Import LitElement,
+    html and css from lit. Use static reactive properties, scoped styles,
+    and customElements.define to register app-button. No React, markdown fences,
+    or explanations. Export the AppButton class.
   text: |
-    Create a simple accessible Button component with variants primary|secondary,
-    optional disabled prop, and TypeScript props interface.
+    Create a simple accessible app-button component with variants primary|secondary,
+    an optional disabled reactive property, a label slot, and TypeScript property types.
 
 output:
   formats:
-    - format: tsx
-  text_format: tsx
+    - format: ts
+  text_format: ts
 
-tags: [component, fixture]
+tags: [component, lit, fixture]
 eval:
   pass_threshold: 0.7
   required_pass: [completeness]
   criteria:
     completeness:
       weight: 3
-      description: "Button export and variants present"
+      description: "AppButton export, app-button registration and variants present"
     type_safety_signals:
       weight: 2
-      description: "Props interface / TypeScript types present"
+      description: "Typed reactive properties and LitElement usage present"
