@@ -82,15 +82,28 @@ fn cap_state_value(state: &Value) -> Value {
 }
 
 /// Read at most `max_bytes` from the head of `path` — never the whole file.
+/// Length in bytes of the UTF-8 sequence led by `lead`. Only ASCII and
+/// valid lead bytes reach this: the head validation has already bailed on
+/// malformed bytes before the cap, so a continuation or invalid lead byte
+/// cannot start the sequence.
+fn utf8_seq_len(lead: u8) -> usize {
+    match lead {
+        0x00..=0x7F => 1,
+        0xC2..=0xDF => 2,
+        0xE0..=0xEF => 3,
+        0xF0..=0xF4 => 4,
+        _ => unreachable!("lead byte validated by from_utf8"),
+    }
+}
+
 /// Returns the head text and the number of file bytes not included (0 when
-/// the whole file was read). A file at or under the cap is read whole (the
-/// plain read, invalid UTF-8 and all). A longer file reads a window of
-/// `max_bytes + 4` bytes — enough to complete a codepoint the cap cuts —
-/// and validates it like the plain read: malformed bytes inside the window
-/// are an error, and only an incomplete final codepoint is trimmed
-/// (`valid_up_to`). The kept text is then walked back to the last character
-/// boundary at or under the cap, so a codepoint straddling the cap is
-/// dropped whole and the wire cap holds.
+/// the whole file was read). Two zones. Bytes before the cap: malformed
+/// there is an error, the same as for a small file. The up-to-three
+/// lookahead bytes after the cap (the read window is the cap plus four)
+/// exist only to complete a character that begins before the cap; when they
+/// are not the continuation bytes that complete it, the partial character
+/// is dropped and the valid prefix returned — bytes after the cap are never
+/// an error.
 fn read_head_capped(path: &Path, max_bytes: usize) -> Result<(String, usize)> {
     use std::io::Read;
     let mut file = std::fs::File::open(path)?;
@@ -103,20 +116,21 @@ fn read_head_capped(path: &Path, max_bytes: usize) -> Result<(String, usize)> {
     let window = (max_bytes + 4).min(len as usize);
     let mut buf = vec![0u8; window];
     file.read_exact(&mut buf)?;
-    let valid = match std::str::from_utf8(&buf) {
-        Ok(_) => buf.len(),
-        // `error_len() == None`: the window ends inside a codepoint — trim
-        // it. `Some(_)`: malformed bytes inside the window — an error, the
-        // same as for a small file.
+    let head_valid = match std::str::from_utf8(&buf[..max_bytes]) {
+        Ok(_) => max_bytes,
+        // The cap ends inside a codepoint; the lookahead decides below.
         Err(e) if e.error_len().is_none() => e.valid_up_to(),
         Err(_) => bail!("output is not valid UTF-8"),
     };
-    let text = std::str::from_utf8(&buf[..valid]).expect("validated above");
-    let mut end = max_bytes.min(text.len());
-    while !text.is_char_boundary(end) {
-        end -= 1;
+    let mut end = head_valid;
+    if end < max_bytes {
+        let seq = utf8_seq_len(buf[end]);
+        if end + seq <= buf.len() && std::str::from_utf8(&buf[end..end + seq]).is_ok() {
+            end += seq;
+        }
     }
-    Ok((text[..end].to_string(), len as usize - end))
+    let text = std::str::from_utf8(&buf[..end]).expect("kept bytes validated");
+    Ok((text.to_string(), len as usize - end))
 }
 
 /// DashScope intl OpenAI-compatible root — final fallback when neither env
@@ -562,8 +576,9 @@ pub struct JudgeOutcome {
 /// observer writes a factual per-criterion description, which becomes the
 /// judged text). Audio must be gated by the caller. Every `state` field is
 /// capped at [`MAX_STATE_FIELD_BYTES`] bytes (head kept, codepoint boundary
-/// respected); the output file is read head-first, never past the cap, and
-/// the total dropped byte count lands on
+/// respected); the output file is read head-first — the cap plus the
+/// lookahead that completes a codepoint the cap cuts — and the assembly cap
+/// still bounds what is sent; the total dropped byte count lands on
 /// [`JudgeRunDetail::state_cut_bytes`] — a cut is never silent. (The
 /// [`JudgeResult`] wire type itself has no room for this provenance.)
 #[allow(clippy::too_many_arguments)]
@@ -1747,11 +1762,11 @@ mod tests {
     }
 
     #[test]
-    fn read_head_capped_errors_on_malformed_bytes_inside_the_window() {
+    fn read_head_capped_errors_on_malformed_bytes_before_the_cap() {
         let dir = scratch_dir("cap-read-bad");
-        // 0xFF is a malformed lead byte 100 bytes in — inside the cap+4
-        // window, not an incomplete final codepoint, so the head read errors
-        // the same way a small-file plain read would.
+        // 0xFF is a malformed lead byte 100 bytes in — before the cap, not
+        // an incomplete final codepoint, so the head read errors the same
+        // way a small-file plain read would.
         let mut bytes = vec![b'x'; 7000];
         bytes[100] = 0xFF;
         let path = dir.0.join("bad.bin");
@@ -1761,20 +1776,48 @@ mod tests {
     }
 
     #[test]
+    fn read_head_capped_truncates_on_malformed_bytes_after_the_cap() {
+        let dir = scratch_dir("cap-read-after");
+        // (a) Malformed byte just past the cap, no codepoint straddling it:
+        // the valid head is kept, the tail dropped, no error.
+        let mut bytes = vec![b'x'; 7100];
+        bytes[MAX_STATE_FIELD_BYTES] = 0xFF;
+        let path = dir.0.join("after.bin");
+        std::fs::write(&path, &bytes).unwrap();
+        let (head, dropped) = read_head_capped(&path, MAX_STATE_FIELD_BYTES).unwrap();
+        assert_eq!(head.len(), MAX_STATE_FIELD_BYTES);
+        assert!(head.chars().all(|c| c == 'x'));
+        assert_eq!(dropped, 7100 - MAX_STATE_FIELD_BYTES);
+        // (b) A codepoint cut by the cap whose lookahead bytes are NOT the
+        // continuation bytes that complete it: the partial character is
+        // dropped and the valid prefix returned, still no error.
+        let mut bytes = vec![b'x'; 7100];
+        bytes[MAX_STATE_FIELD_BYTES - 1] = 0xE8; // 3-byte lead cut by the cap
+        bytes[MAX_STATE_FIELD_BYTES] = 0xFF; // not the continuation
+        let path = dir.0.join("after-cut.bin");
+        std::fs::write(&path, &bytes).unwrap();
+        let (head, dropped) = read_head_capped(&path, MAX_STATE_FIELD_BYTES).unwrap();
+        assert_eq!(head.len(), MAX_STATE_FIELD_BYTES - 1);
+        assert!(head.chars().all(|c| c == 'x'));
+        assert_eq!(dropped, 7100 - (MAX_STATE_FIELD_BYTES - 1));
+    }
+
+    #[test]
     fn read_head_capped_keeps_a_cap_straddling_codepoint_whole() {
         let dir = scratch_dir("cap-read-straddle");
         // A 4-byte codepoint (U+2070E) starts at byte 5998 and straddles the
-        // 6000-byte cap: the head keeps 5998 bytes and drops the character
-        // whole — never split, and the wire cap holds.
+        // 6000-byte cap: the lookahead completes it, so the head keeps the
+        // character whole (the assembly cap re-trims if the field needs it).
         let mut bytes = vec![b'x'; MAX_STATE_FIELD_BYTES - 2];
         bytes.extend_from_slice("\u{2070e}".as_bytes());
         assert_eq!(bytes.len(), MAX_STATE_FIELD_BYTES + 2);
         let path = dir.0.join("straddle.txt");
         std::fs::write(&path, &bytes).unwrap();
         let (head, dropped) = read_head_capped(&path, MAX_STATE_FIELD_BYTES).unwrap();
-        assert_eq!(head.len(), MAX_STATE_FIELD_BYTES - 2);
-        assert!(head.chars().all(|c| c == 'x'));
-        assert_eq!(dropped, 4);
+        assert_eq!(head.len(), MAX_STATE_FIELD_BYTES + 2);
+        assert_eq!(dropped, 0);
+        assert!(head.chars().all(|c| c == 'x' || c == '\u{2070e}'));
+        assert!(head.contains('\u{2070e}'));
     }
 
     #[tokio::test]

@@ -720,9 +720,13 @@ mod tests {
     /// later tests never see leftovers.
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-        LOCK.get_or_init(|| std::sync::Mutex::new(()))
-            .lock()
-            .unwrap()
+        let mutex = LOCK.get_or_init(|| std::sync::Mutex::new(()));
+        // A panicking holder poisons the mutex; recover instead of cascading
+        // the panic into every later env test.
+        match mutex.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
     }
 
     /// Saves one env var at take and restores it on drop.
@@ -739,6 +743,40 @@ mod tests {
                 None => std::env::remove_var(self.0),
             }
         }
+    }
+
+    /// Temp directory removed on drop — including during unwind, so a
+    /// failing assertion never leaks it.
+    struct TempDir(std::path::PathBuf);
+    impl TempDir {
+        fn create(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "media-tool-llm-profiles-{tag}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.subsec_nanos())
+                    .unwrap_or(0)
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            TempDir(dir)
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn env_lock_survives_a_panicking_holder() {
+        // A holder that panics poisons the mutex...
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = env_lock();
+            panic!("env test panics while holding the lock");
+        }));
+        // ...but the next taker recovers and gets the guard.
+        let _guard = env_lock();
     }
 
     #[test]
@@ -838,16 +876,8 @@ mod tests {
         // through the same override + migration as a loaded one, so a
         // profile saved on the shipped default comes back on the endpoint
         // the override names.
-        let dir = std::env::temp_dir().join(format!(
-            "media-tool-llm-profiles-default-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.subsec_nanos())
-                .unwrap_or(0)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("llm-profiles.yaml");
+        let dir = TempDir::create("default-store");
+        let path = dir.0.join("llm-profiles.yaml");
         let mut store = ProfileStore::load_path(&path).unwrap();
         let mut fresh = preset("alibaba");
         fresh.name = "fresh".into();
@@ -860,7 +890,6 @@ mod tests {
             reloaded.profiles["fresh"].base_url,
             "https://dashscope.fresh.example/v1"
         );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
