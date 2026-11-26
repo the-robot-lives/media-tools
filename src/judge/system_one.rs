@@ -222,14 +222,28 @@ pub enum PolicyOverride {
 }
 
 /// Which models report their distributions on the inferred hundredths wire
-/// precision: Alibaba's `decision-model-preview` and the hosted `jev-*`
+/// precision: Alibaba's `decision-model` (GA default; the legacy
+/// `decision-model-preview` id is still recognised — both answer on the
+/// workspace endpoint) and the hosted `jev-*`
 /// classifiers (live capture 2026-11-11 showed real Jev score scalars drift
 /// from Σp·i, which the strict exact-equality check rejects). Both get the
 /// rounded-hundredths policy by default; `PolicyOverride::Strict` restores
 /// the exact check inside the gated path.
+/// The exact Alibaba model ids that report distributions on the inferred
+/// hundredths wire precision — an allowlist, deliberately not a prefix
+/// match: every other id (a prefix-sharing alias, a near-miss, a future
+/// `decision-model-2` re-export) takes the strict exact-mass policy until
+/// it is added here, together with the decode fixtures.
+/// `PolicyOverride::Strict` restores the exact check inside the gated path.
+const ALIBABA_ROUNDED_MODEL_IDS: [&str; 2] = ["decision-model", "decision-model-preview"];
+
+fn is_alibaba_rounded_model(model: &str) -> bool {
+    ALIBABA_ROUNDED_MODEL_IDS.contains(&model)
+}
+
 pub fn policy_for(backend: DecisionBackend, model: &str) -> DistributionPolicy {
     let rounded_model = match backend {
-        DecisionBackend::Alibaba => model == "decision-model-preview",
+        DecisionBackend::Alibaba => is_alibaba_rounded_model(model),
         DecisionBackend::Jev => model.starts_with("jev-"),
     };
     if rounded_model {
@@ -251,8 +265,7 @@ fn resolve_policy(
     // matching tolerates that alias resolution).
     let auto_condition = match backend {
         DecisionBackend::Alibaba => {
-            response_model == "decision-model-preview"
-                && request_model == "decision-model-preview"
+            is_alibaba_rounded_model(response_model) && is_alibaba_rounded_model(request_model)
         }
         DecisionBackend::Jev => {
             response_model.starts_with("jev-") && request_model.starts_with("jev-")
@@ -1537,6 +1550,100 @@ mod tests {
         // ...and forced strict still rejects its 0.99-mass contradiction.
         assert_eq!(
             decode(&jev_body, "jev-latest", DecisionBackend::Jev, &fixture_questions(), PolicyOverride::Strict),
+            Err(DecodeError::InvalidDistribution { question: "route".into() })
+        );
+    }
+
+    #[test]
+    fn ga_decision_model_id_keeps_the_rounded_policy() {
+        // Owner word 2026-11-26: the preview id graduated to the GA
+        // `decision-model` id; BOTH ids keep the rounded policy end to end.
+        assert_eq!(
+            policy_for(DecisionBackend::Alibaba, "decision-model"),
+            DistributionPolicy::AlibabaRoundedHundredths
+        );
+        assert_eq!(
+            policy_for(DecisionBackend::Alibaba, "decision-model-preview"),
+            DistributionPolicy::AlibabaRoundedHundredths
+        );
+        let ga_body = fixture_response()
+            .as_object()
+            .cloned()
+            .map(|mut map| {
+                map.insert("model".into(), json!("decision-model"));
+                put_in(
+                    &Value::Object(map),
+                    &["answers", "route", "probabilities"],
+                    json!({"billing": 0.79, "technical": 0.2}),
+                )
+            })
+            .unwrap();
+        // GA id on both sides decodes under the auto gate.
+        assert!(decode(&ga_body, "decision-model", DecisionBackend::Alibaba, &fixture_questions(), PolicyOverride::Auto).is_ok());
+        // Legacy preview id on both sides still decodes under the same gate.
+        let mut preview_body = ga_body.clone();
+        preview_body["model"] = json!("decision-model-preview");
+        assert!(decode(&preview_body, "decision-model-preview", DecisionBackend::Alibaba, &fixture_questions(), PolicyOverride::Auto).is_ok());
+        // A non-rounded Alibaba model id keeps strict semantics.
+        assert_eq!(
+            policy_for(DecisionBackend::Alibaba, "qwen3.8-flash"),
+            DistributionPolicy::Strict
+        );
+    }
+
+    #[test]
+    fn a_listed_decision_model_id_takes_the_rounded_policy() {
+        // A listed id (see ALIBABA_ROUNDED_MODEL_IDS) gets the rounded
+        // policy and decodes under the auto gate on the captured fixture.
+        assert_eq!(
+            policy_for(DecisionBackend::Alibaba, "decision-model-preview"),
+            DistributionPolicy::AlibabaRoundedHundredths
+        );
+        let ga_body = fixture_response()
+            .as_object()
+            .cloned()
+            .map(|mut map| {
+                map.insert("model".into(), json!("decision-model"));
+                put_in(
+                    &Value::Object(map),
+                    &["answers", "route", "probabilities"],
+                    json!({"billing": 0.79, "technical": 0.2}),
+                )
+            })
+            .unwrap();
+        assert!(decode(&ga_body, "decision-model", DecisionBackend::Alibaba, &fixture_questions(), PolicyOverride::Auto).is_ok());
+    }
+
+    #[test]
+    fn a_prefix_sharing_unlisted_id_stays_strict() {
+        // Only the exact listed ids qualify: an id that merely shares the
+        // prefix keeps strict semantics, auto or forced.
+        assert_eq!(
+            policy_for(DecisionBackend::Alibaba, "decision-model-2"),
+            DistributionPolicy::Strict
+        );
+        assert_eq!(
+            policy_for(DecisionBackend::Alibaba, "decision-model-latest"),
+            DistributionPolicy::Strict
+        );
+        assert_eq!(
+            policy_for(DecisionBackend::Alibaba, "decision-modelx"),
+            DistributionPolicy::Strict
+        );
+        let alias_body = fixture_response()
+            .as_object()
+            .cloned()
+            .map(|mut map| {
+                map.insert("model".into(), json!("decision-model-2"));
+                put_in(
+                    &Value::Object(map),
+                    &["answers", "route", "probabilities"],
+                    json!({"billing": 0.79, "technical": 0.2}),
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            decode(&alias_body, "decision-model-2", DecisionBackend::Alibaba, &fixture_questions(), PolicyOverride::Auto),
             Err(DecodeError::InvalidDistribution { question: "route".into() })
         );
     }

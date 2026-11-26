@@ -122,7 +122,7 @@ pub struct InferenceSection {
 /// ```yaml
 /// judge:
 ///   backend: alibaba        # alibaba | jev (default alibaba)
-///   model: decision-model-preview
+///   model: decision-model
 ///   base: https://workspace.example/compatible-mode/v1   # literal override
 ///   key:                    # ordered sources, first usable hit wins
 ///     - env: QWEN_API_KEY
@@ -133,7 +133,8 @@ pub struct JudgeSection {
     /// `alibaba` | `jev`.
     #[serde(default)]
     pub backend: Option<String>,
-    /// Judge model id (backend default: `decision-model-preview` / `jev-latest`).
+    /// Judge model id (backend default: `decision-model` / `jev-latest`; the legacy
+    /// `decision-model-preview` id is still accepted by the judge decode gate).
     #[serde(default)]
     pub model: Option<String>,
     /// Literal base URL — replaces the env/dc base resolution chain.
@@ -144,7 +145,8 @@ pub struct JudgeSection {
     pub key: Option<Vec<crate::secrets::SecretSource>>,
     /// Distribution policy: `strict` (exact Σp·i equality, the reference
     /// contract) or `rounded` (hundredths-grid policy). Absent = auto-gated
-    /// (rounded for decision-model-preview and jev-* models, strict others).
+    /// (rounded for decision-model and jev-* models — the legacy
+    /// decision-model-preview id included — strict others).
     #[serde(default)]
     pub policy: Option<String>,
 }

@@ -127,7 +127,7 @@ fn live_rubric_encodes() {
     };
     let rubric = build_rubric(&eval);
     let wire = media_tool::judge::system_one::encode(
-        "decision-model-preview",
+        "decision-model",
         &json!({"output": FIXTURE_SVG}),
         &rubric.questions,
     )

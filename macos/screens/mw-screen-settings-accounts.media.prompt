@@ -19,7 +19,7 @@ prompt:
 
     Right window, "Judges" tab selected. A grouped form:
     - "Backend": segmented control "Alibaba | Jev", Alibaba selected.
-    - "Model": pop-up "decision-model-preview".
+    - "Model": pop-up "decision-model".
     - "Key": "Keychain" with a small green check.
     - "Base URL": a filled text field showing "workspace URL" with a green check.
     - "Agreement mode": a switch, off.
@@ -47,11 +47,11 @@ eval:
       description: "reads as a media-generation request/review/grading tool, specifically its settings for connected accounts (memory and eval services) and the automated grading judge"
     follows_spec:
       weight: 0.35
-      description: "shows (1) an Accounts row for therobot.is marked Connected with scopes and Disconnect; (2) an Accounts row for evalonomi.com with a Connect button; (3) a Judges tab with Alibaba backend and decision-model-preview model; (4) a Test result showing pass, latency and an answer"
+      description: "shows (1) an Accounts row for therobot.is marked Connected with scopes and Disconnect; (2) an Accounts row for evalonomi.com with a Connect button; (3) a Judges tab with Alibaba backend and decision-model model; (4) a Test result showing pass, latency and an answer"
     macos_native:
       weight: 0.25
       description: "reads as native macOS 14 Settings windows with icon toolbar tabs, grouped forms, switches and pop-up buttons"
   reject_if:
     - depicts a different product category (web login page, CAD tool, manuscript editor, audio hardware)
-    - primary labels (therobot.is, evalonomi.com, Connect, decision-model-preview, Test) are unreadable or garbled
+    - primary labels (therobot.is, evalonomi.com, Connect, decision-model, Test) are unreadable or garbled
 tags: [screen-comp, macos, media-workbench, v2]

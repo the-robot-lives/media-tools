@@ -1336,7 +1336,7 @@ mod tests {
             json!({"type": "noul", "noul": 0.05}),
         );
         json!({
-            "model": "decision-model-preview",
+            "model": "decision-model",
             "request_id": request_id,
             "answers": Value::Object(answers),
         })
@@ -1801,7 +1801,7 @@ mod tests {
 
         // The judge saw a textual observation, not pixels.
         let captured = judged_state.lock().unwrap().take().expect("judge called");
-        assert_eq!(captured["model"], "decision-model-preview");
+        assert_eq!(captured["model"], "decision-model");
         let state = &captured["state"];
         assert!(
             state["observations"]

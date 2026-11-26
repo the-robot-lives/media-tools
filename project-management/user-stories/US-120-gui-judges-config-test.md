@@ -21,7 +21,7 @@ tags: [gui, settings, judges]
 
 - **Given** Settings → Judges
   **When** I select Alibaba
-  **Then** model defaults to `decision-model-preview` and key source shows env / keychain / dc status without revealing the value
+  **Then** model defaults to `decision-model` and key source shows env / keychain / dc status without revealing the value
 
 - **Given** Alibaba is selected and Base URL is empty
   **When** I view the tab

@@ -13,7 +13,7 @@ Sessions:
 |---|---|---|
 | A | **Request intake**: "I need a hero image for the pricing page", with no YAML | v1 assumes the user starts from a `.media.prompt`. Personas P-002, P-006 and P-008 never will. |
 | B | **Prep + suitability**: an LLM drafts the prompt and the decision model checks it against the target type and provider before money is spent | v1 Author-assist is diff-only and has no pre-flight gate |
-| C | **Decision-model grading**: Alibaba `decision-model-preview` by default, Jev optional, with probabilities and confidence | v1 Grade assumes an LLM's prose score. The judge now returns *distributions*, which deserve a real visual. |
+| C | **Decision-model grading**: Alibaba `decision-model` by default, Jev optional, with probabilities and confidence | v1 Grade assumes an LLM's prose score. The judge now returns *distributions*, which deserve a real visual. |
 | D | **House and project style layers**: copy voice, palettes, typography, element-construction rules and rubrics, composed in layers (mirrors codemoshiach's layered composites) | v1 snippets are flat text prepended to `prompt.system`. They are not structured, not layered, and not gradable. |
 | E | **Connected accounts**: therobot.is (memory of what worked, plus style memories) and evalonomi.com (eval runs, traces, metrics) via per-user OAuth | Nothing in v1 leaves the machine |
 
@@ -184,7 +184,7 @@ Prompts and comps ship in `macos/screens/` — one `*.media.prompt` + `*.png` pa
 | `mw-screen-styles.media.prompt` | S1 three-pane Styles: House → Project → Collection → Prompt stack, facet list, palette editor with WCAG contrast pairs |
 | `mw-screen-styles-composite.media.prompt` | S1 `⌘E` effective composite: rules tagged by winning layer, override trail, suppressed row, evalonomi checksum |
 | `mw-screen-runs-rail.media.prompt` | Runs table plus a live queue rail with per-job progress and cancel. The rail borrows Instrument Deck's idea, not its vocabulary. |
-| `mw-screen-settings-accounts.media.prompt` | S2 + S3 as two Settings windows side by side: therobot.is connected, evalonomi.com connect, and a Judges test result for Alibaba `decision-model-preview` |
+| `mw-screen-settings-accounts.media.prompt` | S2 + S3 as two Settings windows side by side: therobot.is connected, evalonomi.com connect, and a Judges test result for Alibaba `decision-model` |
 
 ### Comp review notes (2026-11-11)
 

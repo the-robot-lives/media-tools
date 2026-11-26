@@ -4,7 +4,25 @@ Milestone-based changelog (this monorepo does not version components independent
 Tags follow `utilities-agent-media-tool/<milestone>`; pre-import milestones (m1–m3)
 are tagged on the original standalone-repo lineage preserved by the subtree squash.
 
+## 2026-11-26
+
+- decision-model GA id sweep + 6000-byte state cap; alibaba chat preset moves to DashScope intl API inference (key order QWEN_API_KEY, DASHSCOPE_API_KEY, ALIBABA_API_KEY; `MEDIA_TOOL_LLM_ALIBABA_BASE_URL` override; stored token-plan URLs migrate) (#53)
+
 ## [Unreleased]
+### Changed
+- 2026-11-26: decision-model GA id sweep. The default judge/eval model id
+  moves from `decision-model-preview` to the GA `decision-model` (same
+  workspace endpoint; .042/M input tokens per owner word); every System One
+  request site now caps each `state` field at `MAX_STATE_FIELD_BYTES = 6000`
+  **bytes** with deterministic head truncation — enforced where the state is
+  assembled (`judge_output`, cuts recorded as dropped byte counts on
+  `JudgeRunDetail`) and re-enforced in `classify` on every string in `state`
+  as a backstop before the request body is built — the output file is read
+  head-first, never past the cap, and the rounded-hundredths policy gate
+  accepts both ids end to end (docs, fixtures and prompt copy updated; the
+  legacy id stays recognised so existing configs and live captures keep
+  decoding). (#53)
+
 ### Added
 - Rubric-gated generation (decision-judge phase 2): prep and eval ride the
   qwen3.8-flash inference profile (`inference:` config section / env / dc

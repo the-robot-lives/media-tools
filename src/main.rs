@@ -147,7 +147,7 @@ enum Commands {
         /// Judge backend: alibaba|jev (default: judge config or alibaba)
         #[arg(long, value_name = "BACKEND")]
         judge: Option<String>,
-        /// Judge model override (default: decision-model-preview / jev-latest)
+        /// Judge model override (default: decision-model / jev-latest)
         #[arg(long, value_name = "ID")]
         judge_model: Option<String>,
         /// Emit machine-readable JSON instead of the human summary
