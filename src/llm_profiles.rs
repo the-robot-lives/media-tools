@@ -27,6 +27,22 @@ pub const PROVIDERS: &[&str] = &[
     "custom",
 ];
 
+/// Shipped `alibaba` preset endpoint: the DashScope intl OpenAI-compatible
+/// host. Services call API inference with their own key — never the Alibaba
+/// token plan (which 403s unless separately purchased).
+pub const ALIBABA_DEFAULT_BASE: &str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
+/// Retired token-plan endpoint. Stored profiles still carrying it are migrated
+/// to [`ALIBABA_DEFAULT_BASE`] (or [`ALIBABA_BASE_URL_ENV`]) at load.
+const RETIRED_ALIBABA_TOKEN_PLAN_BASE: &str =
+    "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1";
+/// Key variables tried in order when an `alibaba` profile carries no explicit
+/// `api_key_env` pin.
+pub const ALIBABA_KEY_ENV_CHAIN: [&str; 3] =
+    ["QWEN_API_KEY", "DASHSCOPE_API_KEY", "ALIBABA_API_KEY"];
+/// Optional base-URL override for `alibaba` profiles still on a shipped
+/// default; a deliberately customized `base_url` is never replaced.
+pub const ALIBABA_BASE_URL_ENV: &str = "MEDIA_TOOL_LLM_ALIBABA_BASE_URL";
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Profile {
@@ -76,6 +92,18 @@ impl Profile {
                     .ok_or_else(|| eyre!("Set {name} for this LLM profile"))?,
             )),
             None if self.local => Ok(None),
+            None if self.provider == "alibaba" => {
+                // The alibaba preset ships unpinned: services use API
+                // inference with their own key, tried in
+                // [`ALIBABA_KEY_ENV_CHAIN`] order. A stored profile that pins
+                // one variable keeps that pin verbatim.
+                for name in ALIBABA_KEY_ENV_CHAIN {
+                    if let Some(value) = std::env::var(name).ok().filter(|v| !v.is_empty()) {
+                        return Ok(Some(value));
+                    }
+                }
+                bail!("Set QWEN_API_KEY, DASHSCOPE_API_KEY or ALIBABA_API_KEY for this LLM profile")
+            }
             None => {
                 bail!("Remote LLM profile needs api_key_env; configure an environment variable reference");
             }
@@ -145,14 +173,37 @@ impl ProfileStore {
         match std::fs::read_to_string(path) {
             Ok(text) => {
                 // Do not include serde's input excerpt: malformed YAML could contain a pasted secret.
-                let store: Self = serde_yaml::from_str(&text).map_err(|_| {
+                let mut store: Self = serde_yaml::from_str(&text).map_err(|_| {
                     eyre!("Invalid LLM profile configuration at {}", path.display())
                 })?;
+                store.migrate_alibaba_base_urls();
                 store.validate()?;
                 Ok(store)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(e) => Err(e).wrap_err("Cannot read LLM profile configuration"),
+        }
+    }
+    /// Keep stored `alibaba` profiles on a working shipped endpoint: the
+    /// retired token-plan host migrates to [`ALIBABA_DEFAULT_BASE`], and
+    /// [`ALIBABA_BASE_URL_ENV`] redirects any profile still on a shipped
+    /// default. A base_url that is neither shipped default is a deliberate
+    /// user choice and is never touched.
+    fn migrate_alibaba_base_urls(&mut self) {
+        for profile in self.profiles.values_mut() {
+            if profile.provider != "alibaba" {
+                continue;
+            }
+            let on_retired_default = profile.base_url == RETIRED_ALIBABA_TOKEN_PLAN_BASE;
+            let on_shipped_default = profile.base_url == ALIBABA_DEFAULT_BASE;
+            if !on_retired_default && !on_shipped_default {
+                continue;
+            }
+            profile.base_url = std::env::var(ALIBABA_BASE_URL_ENV)
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| ALIBABA_DEFAULT_BASE.to_string());
         }
     }
     pub fn validate(&self) -> Result<()> {
@@ -254,11 +305,7 @@ pub fn preset(provider: &str) -> Profile {
             false,
         ),
         "zai" => ("https://api.z.ai/api/paas/v4", Some("ZAI_API_KEY"), false),
-        "alibaba" => (
-            "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
-            Some("ALIBABA_API_KEY"),
-            false,
-        ),
+        "alibaba" => (ALIBABA_DEFAULT_BASE, None, false),
         "openrouter" => (
             "https://openrouter.ai/api/v1",
             Some("OPENROUTER_API_KEY"),
@@ -659,6 +706,84 @@ pub fn import_candidates() -> Result<Vec<(String, Profile)>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn alibaba_preset_pins_dashscope_intl_default_and_key_chain() {
+        let p = preset("alibaba");
+        assert_eq!(p.base_url, "https://dashscope-intl.aliyuncs.com/compatible-mode/v1");
+        assert!(!p.local);
+        assert!(p.api_key_env.is_none());
+        assert_eq!(
+            ALIBABA_KEY_ENV_CHAIN,
+            ["QWEN_API_KEY", "DASHSCOPE_API_KEY", "ALIBABA_API_KEY"]
+        );
+    }
+
+    #[test]
+    fn alibaba_key_resolution_tries_the_chain_in_order_and_honors_a_pin() {
+        let unpinned = preset("alibaba");
+        let mut pinned = preset("alibaba");
+        pinned.api_key_env = Some("MY_ALIBABA_PIN".into());
+
+        // An explicit pin wins even when chain variables are also set.
+        std::env::set_var("MY_ALIBABA_PIN", "pinned");
+        std::env::set_var("QWEN_API_KEY", "qwen");
+        assert_eq!(pinned.api_key().unwrap().as_deref(), Some("pinned"));
+        // Chain order: QWEN first, then DASHSCOPE, then ALIBABA.
+        assert_eq!(unpinned.api_key().unwrap().as_deref(), Some("qwen"));
+        std::env::remove_var("QWEN_API_KEY");
+        std::env::set_var("DASHSCOPE_API_KEY", "dashscope");
+        assert_eq!(unpinned.api_key().unwrap().as_deref(), Some("dashscope"));
+        std::env::remove_var("DASHSCOPE_API_KEY");
+        std::env::set_var("ALIBABA_API_KEY", "alibaba");
+        assert_eq!(unpinned.api_key().unwrap().as_deref(), Some("alibaba"));
+        // Empty values are skipped, not treated as present.
+        std::env::set_var("QWEN_API_KEY", "");
+        std::env::set_var("DASHSCOPE_API_KEY", "dashscope");
+        assert_eq!(unpinned.api_key().unwrap().as_deref(), Some("dashscope"));
+        std::env::remove_var("QWEN_API_KEY");
+        std::env::remove_var("DASHSCOPE_API_KEY");
+        std::env::remove_var("ALIBABA_API_KEY");
+        std::env::remove_var("MY_ALIBABA_PIN");
+        // All unset: fail closed, naming the chain.
+        let err = format!("{}", unpinned.api_key().unwrap_err());
+        assert!(err.contains("QWEN_API_KEY"));
+    }
+
+    #[test]
+    fn alibaba_stored_token_plan_url_migrates_and_env_can_override() {
+        let legacy = |name: &str, url: &str| {
+            let mut p = preset("alibaba");
+            p.name = name.into();
+            p.model = "m".into();
+            p.base_url = url.into();
+            p
+        };
+        let mut store = ProfileStore::default();
+        store
+            .upsert("cloud".into(), legacy("cloud", RETIRED_ALIBABA_TOKEN_PLAN_BASE))
+            .unwrap();
+        store
+            .upsert("custom".into(), legacy("custom", "https://llm.example.internal/v1"))
+            .unwrap();
+
+        // Override wins for profiles still on a shipped default; a customized
+        // URL is never touched.
+        std::env::set_var(ALIBABA_BASE_URL_ENV, "https://dashscope.example.internal/v1");
+        store.migrate_alibaba_base_urls();
+        std::env::remove_var(ALIBABA_BASE_URL_ENV);
+        assert_eq!(store.profiles["cloud"].base_url, "https://dashscope.example.internal/v1");
+        assert_eq!(store.profiles["custom"].base_url, "https://llm.example.internal/v1");
+
+        // Without the override the retired token-plan URL migrates to the
+        // shipped DashScope intl default.
+        let mut store2 = ProfileStore::default();
+        store2
+            .upsert("legacy".into(), legacy("legacy", RETIRED_ALIBABA_TOKEN_PLAN_BASE))
+            .unwrap();
+        store2.migrate_alibaba_base_urls();
+        assert_eq!(store2.profiles["legacy"].base_url, ALIBABA_DEFAULT_BASE);
+    }
+
     #[test]
     fn timeout_override_is_bounded_and_actionable() {
         assert_eq!(super::timeout_seconds(None).unwrap(), 180);

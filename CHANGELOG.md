@@ -6,7 +6,7 @@ are tagged on the original standalone-repo lineage preserved by the subtree squa
 
 ## 2026-11-26
 
-- decision-model GA id sweep + 6000-byte state cap (#53)
+- decision-model GA id sweep + 6000-byte state cap; alibaba chat preset moves to DashScope intl API inference (key order QWEN_API_KEY, DASHSCOPE_API_KEY, ALIBABA_API_KEY; `MEDIA_TOOL_LLM_ALIBABA_BASE_URL` override; stored token-plan URLs migrate) (#53)
 
 ## [Unreleased]
 ### Changed
