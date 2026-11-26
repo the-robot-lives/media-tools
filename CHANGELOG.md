@@ -5,6 +5,16 @@ Tags follow `utilities-agent-media-tool/<milestone>`; pre-import milestones (m1â
 are tagged on the original standalone-repo lineage preserved by the subtree squash.
 
 ## [Unreleased]
+### Changed
+- 2026-11-26: decision-model GA id sweep. The default judge/eval model id
+  moves from `decision-model-preview` to the GA `decision-model` (same
+  workspace endpoint; .042/M input tokens per owner word); every System One
+  request site now caps each `state` field at `MAX_STATE_FIELD_BYTES = 6000`
+  with deterministic head truncation, and the rounded-hundredths policy gate
+  accepts both ids end to end (docs, fixtures and prompt copy updated; the
+  legacy id stays recognised so existing configs and live captures keep
+  decoding).
+
 ### Added
 - Rubric-gated generation (decision-judge phase 2): prep and eval ride the
   qwen3.8-flash inference profile (`inference:` config section / env / dc

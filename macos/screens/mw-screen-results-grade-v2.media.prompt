@@ -15,7 +15,7 @@ prompt:
 
     Bottom: a left-aligned candidate rail of four thumbnails, each with a small circular score badge pinned to the bottom-right corner of the thumbnail, never covering the centre of the image: "84" green badge with a 2pt brass ring (selected), "78" green badge, "61" red badge, and a fourth placeholder tile with a thin progress bar "62%", its badge equally pinned to the bottom-right corner.
 
-    Right: a 320pt drawer on #141415 over the field, titled "Grade", with a small chip "alibaba · decision-model-preview".
+    Right: a 320pt drawer on #141415 over the field, titled "Grade", with a small chip "alibaba · decision-model".
     - Header: "84 / 100" large, and a small green "PASSED".
     - Four criterion rows, each: name, weight × score, a provenance chip, and below it exactly ten small square cells in a row; NOT a gradient; most cells near-black; probability shown by brightness, not by position along a ramp; a thin light tick marks the expected score:
       "composition 0.35 × 88" chip "prompt" — a single very bright cell at position 9 (or 8), neighbours dim — confident;

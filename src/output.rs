@@ -333,7 +333,7 @@ mod tests {
         per.insert("technical".to_string(), 7.0 / 9.0);
         let detail = crate::judge::JudgeRunDetail {
             backend: "alibaba".to_string(),
-            model: "decision-model-preview".to_string(),
+            model: "decision-model".to_string(),
             request_id: Some("req-123".to_string()),
             observer_model: Some("qwen3.8-flash".to_string()),
             probabilities: [
@@ -377,7 +377,7 @@ mod tests {
             "    technical: 0.7778",
             "  judge:",
             "    backend: alibaba",
-            "    model: decision-model-preview",
+            "    model: decision-model",
             "    request_id: req-123",
             "    observer_model: qwen3.8-flash",
             "    probabilities:",

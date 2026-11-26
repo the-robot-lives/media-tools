@@ -132,7 +132,8 @@ request_id, latency_ms, usage}`. Responses are decoded strictly (probability
 vector sums to 1 within 1e-6, choice == argmax, legend keys match the labels);
 the Alibaba **rounded-hundredths** policy (inferred wire precision:
 hundredths-grid probabilities, renormalized mass, attainable-band score check)
-applies itself automatically to `decision-model-preview` responses AND to
+applies itself automatically to `decision-model` responses AND to
+the legacy `decision-model-preview` id (both accepted identically) AND to
 `jev-*` models (user decision 2026-11-11 — live `jev-1.14.0` reports native
 `score` scalars that drift from Σp·i by up to 0.06, which exact equality
 rejects). Other models get the strict check only; `judge: policy: strict`
@@ -159,7 +160,7 @@ environment > dc store > backend default:
 
 | Field | Alibaba | Jev |
 |---|---|---|
-| model | `decision-model-preview` | `jev-latest` |
+| model | `decision-model` | `jev-latest` |
 | base | `QWEN_DECISION_BASE_URL` → dc `services apps.watching_qwen_base_url` (the dedicated decision workspace compatible-mode endpoint, shared with the codemoshiach C1 classifier) → `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `JEV_BASE_URL` → `https://api.typesafe.ai/v1` |
 | key | `QWEN_API_KEY` → `DASHSCOPE_API_KEY` → dc `services apps.npl_mcp_qwen_api_key` → dc `services apps.npl_mcp_dashscope_api_key` | `JEV_API_KEY` → `TYPESAFE_API_KEY` → dc `defaults inference.jev.key` |
 
@@ -176,7 +177,7 @@ fail closed: with no source usable the judge refuses to run.
 ```yaml
 judge:
   backend: alibaba        # alibaba | jev
-  model: decision-model-preview
+  model: decision-model
   base: https://workspace.example/compatible-mode/v1   # literal override
   policy: strict          # strict | rounded (default: auto-gated by model)
   key:                    # ordered sources, first usable hit wins

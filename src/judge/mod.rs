@@ -1,4 +1,5 @@
-//! Decision-model judge: Alibaba `decision-model-preview` (default) and hosted
+//! Decision-model judge: Alibaba `decision-model` (default; the legacy
+//! `decision-model-preview` id is still recognised) and hosted
 //! Jev over the shared TypeSafe System One wire contract.
 //!
 //! [`JudgeConfig::resolve`] layers CLI overrides > runtime `judge:` config >
@@ -45,6 +46,12 @@ pub enum DecisionBackend {
 /// Literal Jev fallback when neither env nor config supplies a base URL.
 const JEV_DEFAULT_BASE: &str = "https://api.typesafe.ai/v1";
 
+/// Head cap in bytes on any one text field the judge sends to the decision
+/// model (`prompt`, `output`, `observations`) — owner word 2026-11-26: never
+/// take in huge datasets. Truncation is deterministic (head kept, cut at a
+/// UTF-8 char boundary via [`crate::text::truncate`]).
+pub(crate) const MAX_STATE_FIELD_BYTES: usize = 6_000;
+
 /// DashScope intl OpenAI-compatible root — final fallback when neither env
 /// (`QWEN_DECISION_BASE_URL`) nor the dc store (`services
 /// apps.watching_qwen_base_url`, the dedicated decision workspace endpoint)
@@ -62,7 +69,7 @@ impl DecisionBackend {
 
     pub fn default_model(&self) -> &'static str {
         match self {
-            DecisionBackend::Alibaba => "decision-model-preview",
+            DecisionBackend::Alibaba => "decision-model",
             DecisionBackend::Jev => "jev-latest",
         }
     }
@@ -495,7 +502,7 @@ pub async fn judge_output(
 ) -> Result<JudgeOutcome> {
     let rubric = build_rubric(eval);
     let mut state = json!({
-        "prompt": prompt_text,
+        "prompt": crate::text::truncate(prompt_text, MAX_STATE_FIELD_BYTES),
         "asset_type": asset_type_label,
         "output_format": output_format,
     });
@@ -507,7 +514,7 @@ pub async fn judge_output(
             if content.trim().is_empty() {
                 bail!("output file {} is empty", output_path.display());
             }
-            state["output"] = json!(content);
+            state["output"] = json!(crate::text::truncate(&content, MAX_STATE_FIELD_BYTES));
         }
         OutputKind::Image | OutputKind::Video => {
             let observer = observer.ok_or_else(|| {
@@ -536,7 +543,7 @@ pub async fn judge_output(
             let observed = observer
                 .describe(&crate::inference::criterion_brief(eval), &attachments, verbose)
                 .await?;
-            state["observations"] = json!(observed.description);
+            state["observations"] = json!(crate::text::truncate(&observed.description, MAX_STATE_FIELD_BYTES));
             state["observed_by"] = json!(observed.model);
             observer_model = Some(observed.model);
         }
@@ -940,7 +947,7 @@ mod tests {
         let eval = sample_eval();
         let rubric = build_rubric(&eval);
         let result = JudgeResult {
-            model: "decision-model-preview".into(),
+            model: "decision-model".into(),
             request_id: Some("req-1".into()),
             latency_ms: Some(12.0),
             usage: BTreeMap::new(),
@@ -956,7 +963,7 @@ mod tests {
         assert_eq!(score.per_criterion.get("validity"), Some(&0.9));
         assert!(score.reject_hits.is_empty());
         assert!(score.passes(&eval));
-        assert!(score.notes.contains("judge=alibaba:decision-model-preview"));
+        assert!(score.notes.contains("judge=alibaba:decision-model"));
         assert!(score.notes.contains("req-1"));
 
         // A true noul answer becomes a reject hit and fails the gate.
@@ -1012,7 +1019,7 @@ mod tests {
         )
         .expect("resolve");
         assert_eq!(cfg.backend, DecisionBackend::Alibaba);
-        assert_eq!(cfg.model, "decision-model-preview");
+        assert_eq!(cfg.model, "decision-model");
         assert_eq!(cfg.key.expose(), "fixture-key");
 
         let cfg = JudgeConfig::resolve_with(
@@ -1213,7 +1220,7 @@ mod tests {
         };
 
         let response = json!({
-            "model": "decision-model-preview",
+            "model": "decision-model",
             "request_id": "mock-req-1",
             "latency_ms": 3.0,
             "usage": {"input_tokens": 40, "output_tokens": 8, "total_tokens": 48},
@@ -1299,7 +1306,7 @@ mod tests {
         // Captured request: bearer header, model id, wire shapes.
         let captured = captured.lock().unwrap().take().expect("handler ran");
         assert_eq!(captured.0.as_deref(), Some("Bearer fixture-key"));
-        assert_eq!(captured.1["model"], "decision-model-preview");
+        assert_eq!(captured.1["model"], "decision-model");
         assert!(captured.1["questions"]["criterion:validity"]["criteria"]
             .as_array()
             .is_some_and(|levels| levels.len() == 10));
@@ -1307,7 +1314,7 @@ mod tests {
 
         // Decoded result: identity, safe usage, auto-rounded policy.
         assert_eq!(result.request_id.as_deref(), Some("mock-req-1"));
-        assert_eq!(result.model, "decision-model-preview");
+        assert_eq!(result.model, "decision-model");
         assert_eq!(result.usage.get("total_tokens"), Some(&48));
         let validity = result
             .answers
@@ -1393,5 +1400,161 @@ mod tests {
         assert_eq!(output_kind("mp3"), OutputKind::Audio);
         assert_eq!(output_kind("mp4"), OutputKind::Video);
         assert_eq!(output_kind("pdf"), OutputKind::Unknown);
+    }
+
+    // ----- decision-model GA id + wire caps -----
+
+    #[test]
+    fn default_model_is_the_ga_decision_model_id() {
+        // Owner word 2026-11-26: the preview id graduated; the default the
+        // judge sends is the GA `decision-model` id.
+        assert_eq!(DecisionBackend::Alibaba.default_model(), "decision-model");
+        assert_eq!(DecisionBackend::Jev.default_model(), "jev-latest");
+        let cfg = JudgeConfig::resolve_with(
+            Some("alibaba"),
+            None,
+            None,
+            &env_lookup(&[("QWEN_API_KEY", "fixture-key")]),
+            &dc_none(),
+        )
+        .expect("resolve");
+        assert_eq!(cfg.model, "decision-model");
+    }
+
+    /// Mock System One server + captured body, shared by the cap test.
+    async fn spawn_mock_systemone(response: Value) -> (String, std::sync::Arc<std::sync::Mutex<Option<Value>>>, tokio::sync::oneshot::Sender<()>) {
+        use axum::routing::post;
+        use axum::{Json, Router};
+        let captured: std::sync::Arc<std::sync::Mutex<Option<Value>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(None));
+        let state = captured.clone();
+        let app = Router::new()
+            .route(
+                "/v1/systemone",
+                post(
+                    |axum::extract::State(sink): axum::extract::State<
+                        std::sync::Arc<std::sync::Mutex<Option<Value>>>,
+                    >,
+                     Json(body): Json<Value>| async move {
+                        *sink.lock().unwrap() = Some(body);
+                        Json(response.clone())
+                    },
+                ),
+            )
+            .with_state(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = rx.await;
+                })
+                .await
+                .ok();
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        (format!("http://{addr}/v1"), captured, tx)
+    }
+
+    #[tokio::test]
+    async fn judge_output_caps_state_fields_at_the_wire() {
+        // The decode fixture must answer the GA request model under the
+        // rounded policy (fixtures mirror the 2026-11-11 live captures).
+        // Legend labels must match the rubric byte-for-byte and probability
+        // vectors need the full 10-level cardinality — same construction as
+        // classify_via_mock_systemone_server.
+        let legend_for = |description: &str, fail_signals: &[&str]| -> Value {
+            let signals: Vec<String> = fail_signals.iter().map(|s| s.to_string()).collect();
+            let mut map = serde_json::Map::new();
+            for index in 0..system_one::MAX_SCORE_LEVELS {
+                map.insert(
+                    index.to_string(),
+                    json!(score_level_label(index, description, &signals)),
+                );
+            }
+            Value::Object(map)
+        };
+        let levels_object = |entries: &[(&str, f64)]| -> Value {
+            let mut map = serde_json::Map::new();
+            for index in 0..system_one::MAX_SCORE_LEVELS {
+                let key = index.to_string();
+                let value = entries
+                    .iter()
+                    .find(|(id, _)| *id == key)
+                    .map(|(_, v)| *v)
+                    .unwrap_or(0.0);
+                map.insert(key, json!(value));
+            }
+            Value::Object(map)
+        };
+        let response = json!({
+            "model": "decision-model",
+            "request_id": "mock-req-cap",
+            "answers": {
+                "criterion:validity": {
+                    "type": "score",
+                    "score": 8.0,
+                    "probabilities": levels_object(&[("8", 1.0)]),
+                    "legend": legend_for("well-formed markup with no syntax errors", &["unclosed tags"]),
+                    "confidence": 0.8
+                },
+                "criterion:relevance": {
+                    "type": "score",
+                    "score": 8.0,
+                    "probabilities": levels_object(&[("8", 1.0)]),
+                    "legend": legend_for("matches the brief", &[]),
+                    "confidence": 0.9
+                },
+                "reject:00": {"type": "noul", "noul": 0.05}
+            }
+        });
+        let (base, captured, tx) = spawn_mock_systemone(response).await;
+        let env = env_lookup(&[("QWEN_API_KEY", "fixture-key")]);
+        let cfg = JudgeConfig::resolve_with(None, None, None, &env, &dc_none()).unwrap();
+        let cfg = JudgeConfig {
+            base,
+            ..cfg
+        };
+
+        let dir = std::env::temp_dir().join(format!(
+            "media-tool-judge-cap-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let output_path = dir.join("out.svg");
+        let huge = "x".repeat(MAX_STATE_FIELD_BYTES + 5_000);
+        let prompt = format!("brief prefix {}", "y".repeat(MAX_STATE_FIELD_BYTES + 2_000));
+        std::fs::write(&output_path, &huge).unwrap();
+
+        let eval = sample_eval();
+        let outcome = judge_output(
+            &cfg,
+            None,
+            &prompt,
+            "image",
+            "svg",
+            OutputKind::Text,
+            &output_path,
+            &eval,
+            false,
+        )
+        .await
+        .expect("judge_output");
+        assert!(outcome.score.weighted.is_finite());
+        let _ = tx.send(());
+
+        // Every state field the judge sent is capped at the named bound,
+        // head kept, and the request model is the GA id.
+        let body = captured.lock().unwrap().take().expect("handler ran");
+        assert_eq!(body["model"], "decision-model");
+        let state = &body["state"];
+        let sent_prompt = state["prompt"].as_str().unwrap();
+        let sent_output = state["output"].as_str().unwrap();
+        assert_eq!(sent_output.len(), MAX_STATE_FIELD_BYTES);
+        assert_eq!(sent_output, &huge[..MAX_STATE_FIELD_BYTES]);
+        assert_eq!(sent_prompt.len(), MAX_STATE_FIELD_BYTES);
+        assert!(sent_prompt.starts_with("brief prefix "));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

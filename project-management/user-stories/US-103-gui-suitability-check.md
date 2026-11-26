@@ -29,7 +29,7 @@ tags: [gui, suitability, judge, pre-flight]
 
 - **Given** the check completes
   **When** I read the card
-  **Then** a judge chip names backend and model (e.g. `alibaba · decision-model-preview`) and provenance chips list the style layers composed into the prompt; clicking a chip opens Styles at that layer
+  **Then** a judge chip names backend and model (e.g. `alibaba · decision-model`) and provenance chips list the style layers composed into the prompt; clicking a chip opens Styles at that layer
 
 - **Given** no judge is configured
   **When** I open the Suitability card
