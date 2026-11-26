@@ -229,14 +229,13 @@ pub enum PolicyOverride {
 /// from Σp·i, which the strict exact-equality check rejects). Both get the
 /// rounded-hundredths policy by default; `PolicyOverride::Strict` restores
 /// the exact check inside the gated path.
-/// Literal id allowlist, deliberately not a prefix match: a future alias or
-/// versioned decision-model id (`decision-model-2`, a workspace re-export)
-/// silently falls back to the strict exact-mass policy and rejects the real
-/// hundredths drift those services emit until it is added here. When Alibaba
-/// ships a new decision-model id, extend this list and the decode fixtures
-/// together.
+/// Literal-or-prefix: the GA `decision-model` id and any `decision-model-*`
+/// alias or version (`decision-model-preview` today; a future workspace
+/// re-export like `decision-model-2` qualifies without a code change). Any
+/// other id — near-miss spellings included — keeps the strict exact-mass
+/// policy; `PolicyOverride::Strict` restores it inside the gated path.
 fn is_alibaba_rounded_model(model: &str) -> bool {
-    model == "decision-model" || model == "decision-model-preview"
+    model == "decision-model" || model.starts_with("decision-model-")
 }
 
 pub fn policy_for(backend: DecisionBackend, model: &str) -> DistributionPolicy {
@@ -1586,6 +1585,47 @@ mod tests {
         assert_eq!(
             policy_for(DecisionBackend::Alibaba, "qwen3.8-flash"),
             DistributionPolicy::Strict
+        );
+    }
+
+    #[test]
+    fn alibaba_rounded_gate_accepts_decision_model_prefix_ids() {
+        // Literal-or-prefix: any `decision-model-*` alias qualifies (a future
+        // workspace re-export needs no code change); near-miss ids do not.
+        assert_eq!(
+            policy_for(DecisionBackend::Alibaba, "decision-model-2"),
+            DistributionPolicy::AlibabaRoundedHundredths
+        );
+        assert_eq!(
+            policy_for(DecisionBackend::Alibaba, "decision-model-latest"),
+            DistributionPolicy::AlibabaRoundedHundredths
+        );
+        assert_eq!(
+            policy_for(DecisionBackend::Alibaba, "decision-modelx"),
+            DistributionPolicy::Strict
+        );
+        assert_eq!(
+            policy_for(DecisionBackend::Alibaba, "my-decision-model"),
+            DistributionPolicy::Strict
+        );
+        // End to end: a prefixed alias id decodes under the auto gate on the
+        // same fixture the GA id uses; strict keeps rejecting the drift.
+        let alias_body = fixture_response()
+            .as_object()
+            .cloned()
+            .map(|mut map| {
+                map.insert("model".into(), json!("decision-model-2"));
+                put_in(
+                    &Value::Object(map),
+                    &["answers", "route", "probabilities"],
+                    json!({"billing": 0.79, "technical": 0.2}),
+                )
+            })
+            .unwrap();
+        assert!(decode(&alias_body, "decision-model-2", DecisionBackend::Alibaba, &fixture_questions(), PolicyOverride::Auto).is_ok());
+        assert_eq!(
+            decode(&alias_body, "decision-model-2", DecisionBackend::Alibaba, &fixture_questions(), PolicyOverride::Strict),
+            Err(DecodeError::InvalidDistribution { question: "route".into() })
         );
     }
 

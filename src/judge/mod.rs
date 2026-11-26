@@ -84,10 +84,13 @@ fn cap_state_value(state: &Value) -> Value {
 /// Read at most `max_bytes` from the head of `path` — never the whole file.
 /// Returns the head text and the number of file bytes not included (0 when
 /// the whole file was read). A file at or under the cap is read whole (the
-/// plain read, invalid UTF-8 and all); a longer file reads exactly the head
-/// bytes, and the only possible invalid UTF-8 there is the cap landing inside
-/// the final codepoint — `valid_up_to` is that codepoint's boundary, so the
-/// cut drops it whole and never splits a codepoint.
+/// plain read, invalid UTF-8 and all). A longer file reads a window of
+/// `max_bytes + 4` bytes — enough to complete a codepoint the cap cuts —
+/// and validates it like the plain read: malformed bytes inside the window
+/// are an error, and only an incomplete final codepoint is trimmed
+/// (`valid_up_to`). The kept text is then walked back to the last character
+/// boundary at or under the cap, so a codepoint straddling the cap is
+/// dropped whole and the wire cap holds.
 fn read_head_capped(path: &Path, max_bytes: usize) -> Result<(String, usize)> {
     use std::io::Read;
     let mut file = std::fs::File::open(path)?;
@@ -97,15 +100,23 @@ fn read_head_capped(path: &Path, max_bytes: usize) -> Result<(String, usize)> {
         file.read_to_string(&mut content)?;
         return Ok((content, 0));
     }
-    let mut buf = vec![0u8; max_bytes];
+    let window = (max_bytes + 4).min(len as usize);
+    let mut buf = vec![0u8; window];
     file.read_exact(&mut buf)?;
-    let end = match std::str::from_utf8(&buf) {
+    let valid = match std::str::from_utf8(&buf) {
         Ok(_) => buf.len(),
-        Err(e) => e.valid_up_to(),
+        // `error_len() == None`: the window ends inside a codepoint — trim
+        // it. `Some(_)`: malformed bytes inside the window — an error, the
+        // same as for a small file.
+        Err(e) if e.error_len().is_none() => e.valid_up_to(),
+        Err(_) => bail!("output is not valid UTF-8"),
     };
-    let content =
-        String::from_utf8(buf[..end].to_vec()).map_err(|_| eyre!("output is not valid UTF-8"))?;
-    Ok((content, len as usize - end))
+    let text = std::str::from_utf8(&buf[..valid]).expect("validated above");
+    let mut end = max_bytes.min(text.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    Ok((text[..end].to_string(), len as usize - end))
 }
 
 /// DashScope intl OpenAI-compatible root — final fallback when neither env
@@ -319,11 +330,11 @@ fn real_dc() -> impl Fn(&str, &str) -> io::Result<DcOutput> {
 /// One System One request: `POST {base}/systemone` with bearer auth, then
 /// strict decode (the rounded-hundredths policy applies itself when the
 /// Alibaba decision model answers). Every string inside `state` is capped at
-/// [`MAX_STATE_FIELD_BYTES`] bytes before the body is built — a backstop for
-/// callers that skip the [`judge_output`] assembly. Backstop cuts are not
-/// recorded: [`JudgeResult`] is the decoded wire shape and carries no room
-/// for provenance (cuts made where the state is assembled are recorded on
-/// [`JudgeRunDetail`]).
+/// [`MAX_STATE_FIELD_BYTES`] bytes by the [`cap_state_value`] backstop before
+/// the body is built. [`JudgeResult`] has no room for a "state was cut" flag
+/// — it is the decoded wire shape — so no flag is returned here: cuts made
+/// where the state is assembled are recorded on
+/// [`JudgeRunDetail::state_cut_bytes`].
 pub async fn classify(
     cfg: &JudgeConfig,
     state: &Value,
@@ -1546,32 +1557,26 @@ mod tests {
         }
     }
 
-    #[test]
-    fn cap_state_field_counts_bytes_and_never_splits_a_codepoint() {
-        // Exactly at the cap: no cut.
-        let exact = "x".repeat(MAX_STATE_FIELD_BYTES);
-        let (capped, dropped) = cap_state_field(&exact);
-        assert_eq!(capped.len(), MAX_STATE_FIELD_BYTES);
-        assert_eq!(dropped, 0);
-        // Multibyte: the cap's last byte lands inside a 3-byte codepoint; the
-        // cut walks back so the trailing codepoint is dropped whole. This is
-        // the shared helper behind every state-field cut, including the
-        // image/video `observations` path.
-        let text = format!("{}{}", "x".repeat(MAX_STATE_FIELD_BYTES - 1), "\u{8bc4}");
-        let (capped, dropped) = cap_state_field(&text);
-        assert_eq!(capped.len(), MAX_STATE_FIELD_BYTES - 1);
-        assert_eq!(dropped, 3);
-        assert!(capped.is_char_boundary(capped.len()));
-        assert!(!capped.contains('\u{8bc4}'));
+    /// Temp dir with pid + nanos in the name, created and Drop-cleaned.
+    fn scratch_dir(tag: &str) -> ScratchDir {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        let dir = ScratchDir(std::env::temp_dir().join(format!(
+            "media-tool-judge-{tag}-{}-{}",
+            std::process::id(),
+            nanos
+        )));
+        std::fs::create_dir_all(&dir.0).unwrap();
+        dir
     }
 
-    #[tokio::test]
-    async fn judge_output_caps_state_fields_at_the_wire() {
-        // The decode fixture must answer the GA request model under the
-        // rounded policy (fixtures mirror the 2026-11-11 live captures).
-        // Legend labels must match the rubric byte-for-byte and probability
-        // vectors need the full 10-level cardinality — same construction as
-        // classify_via_mock_systemone_server.
+    /// Score fixture for the sample_eval rubric (validity + relevance),
+    /// mirroring the 2026-11-11 live captures: the GA request model under
+    /// the rounded policy, legend labels byte-for-byte, full 10-level
+    /// cardinality. Shared by the cap tests.
+    fn cap_fixture_response() -> Value {
         let legend_for = |description: &str, fail_signals: &[&str]| -> Value {
             let signals: Vec<String> = fail_signals.iter().map(|s| s.to_string()).collect();
             let mut map = serde_json::Map::new();
@@ -1596,7 +1601,7 @@ mod tests {
             }
             Value::Object(map)
         };
-        let response = json!({
+        json!({
             "model": "decision-model",
             "request_id": "mock-req-cap",
             "answers": {
@@ -1616,8 +1621,69 @@ mod tests {
                 },
                 "reject:00": {"type": "noul", "noul": 0.05}
             }
+        })
+    }
+
+    /// Mock OpenAI-compatible chat-completions endpoint returning one fixed
+    /// message content string — the Observer path's server side.
+    async fn spawn_mock_chat(content: String) -> (String, tokio::sync::oneshot::Sender<()>) {
+        use axum::routing::post;
+        use axum::{Json, Router};
+        let response = std::sync::Arc::new(json!({
+            "choices": [{
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": "stop"
+            }]
+        }));
+        let app = Router::new()
+            .route(
+                "/chat/completions",
+                post(
+                    |axum::extract::State(sink): axum::extract::State<std::sync::Arc<Value>>| async move {
+                        Json((*sink).clone())
+                    },
+                ),
+            )
+            .with_state(response);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = rx.await;
+                })
+                .await
+                .ok();
         });
-        let (base, captured, tx) = spawn_mock_systemone(response).await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        (format!("http://{addr}"), tx)
+    }
+
+    #[test]
+    fn cap_state_field_counts_bytes_and_never_splits_a_codepoint() {
+        // Exactly at the cap: no cut.
+        let exact = "x".repeat(MAX_STATE_FIELD_BYTES);
+        let (capped, dropped) = cap_state_field(&exact);
+        assert_eq!(capped.len(), MAX_STATE_FIELD_BYTES);
+        assert_eq!(dropped, 0);
+        // Multibyte: the cap's last byte lands inside a 3-byte codepoint; the
+        // cut walks back so the trailing codepoint is dropped whole. This is
+        // the shared helper behind every state-field cut, including the
+        // image/video `observations` path.
+        let text = format!("{}{}", "x".repeat(MAX_STATE_FIELD_BYTES - 1), "\u{8bc4}");
+        let (capped, dropped) = cap_state_field(&text);
+        assert_eq!(capped.len(), MAX_STATE_FIELD_BYTES - 1);
+        assert_eq!(dropped, 3);
+        assert!(capped.is_char_boundary(capped.len()));
+        assert!(!capped.contains('\u{8bc4}'));
+    }
+
+    #[tokio::test]
+    async fn judge_output_caps_state_fields_at_the_wire() {
+        // The decode fixture must answer the GA request model under the
+        // rounded policy (see cap_fixture_response).
+        let (base, captured, tx) = spawn_mock_systemone(cap_fixture_response()).await;
         let env = env_lookup(&[("QWEN_API_KEY", "fixture-key")]);
         let cfg = JudgeConfig::resolve_with(None, None, None, &env, &dc_none()).unwrap();
         let cfg = JudgeConfig {
@@ -1678,5 +1744,107 @@ mod tests {
         // tail codepoint dropped 3 (head read walk-back; the field cap cut
         // nothing further).
         assert_eq!(outcome.detail.state_cut_bytes, 6006 + 3);
+    }
+
+    #[test]
+    fn read_head_capped_errors_on_malformed_bytes_inside_the_window() {
+        let dir = scratch_dir("cap-read-bad");
+        // 0xFF is a malformed lead byte 100 bytes in — inside the cap+4
+        // window, not an incomplete final codepoint, so the head read errors
+        // the same way a small-file plain read would.
+        let mut bytes = vec![b'x'; 7000];
+        bytes[100] = 0xFF;
+        let path = dir.0.join("bad.bin");
+        std::fs::write(&path, &bytes).unwrap();
+        let err = format!("{}", read_head_capped(&path, MAX_STATE_FIELD_BYTES).unwrap_err());
+        assert!(err.contains("not valid UTF-8"), "{err}");
+    }
+
+    #[test]
+    fn read_head_capped_keeps_a_cap_straddling_codepoint_whole() {
+        let dir = scratch_dir("cap-read-straddle");
+        // A 4-byte codepoint (U+2070E) starts at byte 5998 and straddles the
+        // 6000-byte cap: the head keeps 5998 bytes and drops the character
+        // whole — never split, and the wire cap holds.
+        let mut bytes = vec![b'x'; MAX_STATE_FIELD_BYTES - 2];
+        bytes.extend_from_slice("\u{2070e}".as_bytes());
+        assert_eq!(bytes.len(), MAX_STATE_FIELD_BYTES + 2);
+        let path = dir.0.join("straddle.txt");
+        std::fs::write(&path, &bytes).unwrap();
+        let (head, dropped) = read_head_capped(&path, MAX_STATE_FIELD_BYTES).unwrap();
+        assert_eq!(head.len(), MAX_STATE_FIELD_BYTES - 2);
+        assert!(head.chars().all(|c| c == 'x'));
+        assert_eq!(dropped, 4);
+    }
+
+    #[tokio::test]
+    async fn judge_output_caps_image_observations_at_the_wire() {
+        // The observer (chat-completions path) returns one oversized
+        // observation; the Image assembly path must cap `state["observations"]`
+        // at the same backstop and record the cut.
+        let content = json!({
+            "observations": {
+                "validity": "clean",
+                "relevance": "x".repeat(MAX_STATE_FIELD_BYTES + 6)
+            }
+        })
+        .to_string();
+        let (chat_base, chat_tx) = spawn_mock_chat(content.clone()).await;
+        let (base, captured, tx) = spawn_mock_systemone(cap_fixture_response()).await;
+        let env = env_lookup(&[("QWEN_API_KEY", "fixture-key")]);
+        let cfg = JudgeConfig::resolve_with(None, None, None, &env, &dc_none()).unwrap();
+        let cfg = JudgeConfig {
+            base,
+            ..cfg
+        };
+        let inference = crate::inference::InferenceConfig::resolve_with(
+            None,
+            &env_lookup(&[("QWEN_API_KEY", "fixture-key")]),
+            &dc_none(),
+        )
+        .unwrap();
+        let inference = crate::inference::InferenceConfig {
+            base: chat_base,
+            ..inference
+        };
+        let observer = crate::inference::Observer::new(inference);
+
+        let dir = scratch_dir("cap-observations");
+        let output_path = dir.0.join("out.png");
+        std::fs::write(&output_path, b"png").unwrap();
+
+        let outcome = judge_output(
+            &cfg,
+            Some(&observer),
+            "brief",
+            "image",
+            "png",
+            OutputKind::Image,
+            &output_path,
+            &sample_eval(),
+            false,
+        )
+        .await
+        .expect("judge_output");
+        assert!(outcome.score.weighted.is_finite());
+        let _ = tx.send(());
+        let _ = chat_tx.send(());
+
+        let body = captured.lock().unwrap().take().expect("handler ran");
+        let state = &body["state"];
+        let sent = state["observations"].as_str().unwrap();
+        assert_eq!(sent.len(), MAX_STATE_FIELD_BYTES);
+        // The field is the observation content's head: the JSON prefix is
+        // intact and the cut lands inside the oversized value's run of 'x'.
+        assert!(sent.starts_with("{\"observations\":"));
+        assert!(sent.contains("\"relevance\":\"xx"));
+        assert!(sent.ends_with('x'));
+        assert!(!state["observed_by"].as_str().unwrap().is_empty());
+        // Only the observation tail was cut: the prompt "brief" is tiny, so
+        // the recorded cut is the content length minus the cap.
+        assert_eq!(
+            outcome.detail.state_cut_bytes,
+            content.len() - MAX_STATE_FIELD_BYTES
+        );
     }
 }

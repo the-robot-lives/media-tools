@@ -102,7 +102,10 @@ impl Profile {
                         return Ok(Some(value));
                     }
                 }
-                bail!("Set QWEN_API_KEY, DASHSCOPE_API_KEY or ALIBABA_API_KEY for this LLM profile")
+                bail!(
+                    "Set {} for this LLM profile",
+                    ALIBABA_KEY_ENV_CHAIN.join(", ")
+                )
             }
             None => {
                 bail!("Remote LLM profile needs api_key_env; configure an environment variable reference");
@@ -180,7 +183,13 @@ impl ProfileStore {
                 store.validate()?;
                 Ok(store)
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // A fresh install goes through the same migration as a loaded
+                // store, so the env override applies from the first save.
+                let mut store = Self::default();
+                store.migrate_alibaba_base_urls();
+                Ok(store)
+            }
             Err(e) => Err(e).wrap_err("Cannot read LLM profile configuration"),
         }
     }
@@ -706,6 +715,32 @@ pub fn import_candidates() -> Result<Vec<(String, Profile)>> {
 
 #[cfg(test)]
 mod tests {
+    /// Serialize tests that mutate process-global env vars; every touched
+    /// variable is saved on take and restored on drop, so parallel tests and
+    /// later tests never see leftovers.
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .unwrap()
+    }
+
+    /// Saves one env var at take and restores it on drop.
+    struct SavedVar(&'static str, Option<String>);
+    impl SavedVar {
+        fn take(name: &'static str) -> Self {
+            SavedVar(name, std::env::var(name).ok())
+        }
+    }
+    impl Drop for SavedVar {
+        fn drop(&mut self) {
+            match &self.1 {
+                Some(value) => std::env::set_var(self.0, value),
+                None => std::env::remove_var(self.0),
+            }
+        }
+    }
+
     #[test]
     fn alibaba_preset_pins_dashscope_intl_default_and_key_chain() {
         let p = preset("alibaba");
@@ -720,6 +755,12 @@ mod tests {
 
     #[test]
     fn alibaba_key_resolution_tries_the_chain_in_order_and_honors_a_pin() {
+        let _guard = env_lock();
+        let _q = SavedVar::take("QWEN_API_KEY");
+        let _d = SavedVar::take("DASHSCOPE_API_KEY");
+        let _a = SavedVar::take("ALIBABA_API_KEY");
+        let _p = SavedVar::take("MY_ALIBABA_PIN");
+
         let unpinned = preset("alibaba");
         let mut pinned = preset("alibaba");
         pinned.api_key_env = Some("MY_ALIBABA_PIN".into());
@@ -751,6 +792,9 @@ mod tests {
 
     #[test]
     fn alibaba_stored_token_plan_url_migrates_and_env_can_override() {
+        let _guard = env_lock();
+        let _o = SavedVar::take(ALIBABA_BASE_URL_ENV);
+
         let legacy = |name: &str, url: &str| {
             let mut p = preset("alibaba");
             p.name = name.into();
@@ -782,6 +826,41 @@ mod tests {
             .unwrap();
         store2.migrate_alibaba_base_urls();
         assert_eq!(store2.profiles["legacy"].base_url, ALIBABA_DEFAULT_BASE);
+    }
+
+    #[test]
+    fn default_store_migrates_like_a_loaded_store() {
+        let _guard = env_lock();
+        let _o = SavedVar::take(ALIBABA_BASE_URL_ENV);
+        std::env::set_var(ALIBABA_BASE_URL_ENV, "https://dashscope.fresh.example/v1");
+
+        // Fresh install: no stored config anywhere. The default store goes
+        // through the same override + migration as a loaded one, so a
+        // profile saved on the shipped default comes back on the endpoint
+        // the override names.
+        let dir = std::env::temp_dir().join(format!(
+            "media-tool-llm-profiles-default-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("llm-profiles.yaml");
+        let mut store = ProfileStore::load_path(&path).unwrap();
+        let mut fresh = preset("alibaba");
+        fresh.name = "fresh".into();
+        fresh.model = "m".into();
+        store.upsert("fresh".into(), fresh).unwrap();
+        store.save_path(&path).unwrap();
+
+        let reloaded = ProfileStore::load_path(&path).unwrap();
+        assert_eq!(
+            reloaded.profiles["fresh"].base_url,
+            "https://dashscope.fresh.example/v1"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
