@@ -46,11 +46,67 @@ pub enum DecisionBackend {
 /// Literal Jev fallback when neither env nor config supplies a base URL.
 const JEV_DEFAULT_BASE: &str = "https://api.typesafe.ai/v1";
 
-/// Head cap in bytes on any one text field the judge sends to the decision
+/// Head cap in **bytes** on any one text field the judge sends to the decision
 /// model (`prompt`, `output`, `observations`) — owner word 2026-11-26: never
-/// take in huge datasets. Truncation is deterministic (head kept, cut at a
-/// UTF-8 char boundary via [`crate::text::truncate`]).
+/// take in huge datasets. The limit counts bytes (`str::len`), never
+/// characters; a cut walks back to a UTF-8 codepoint boundary so no codepoint
+/// is split. Truncation is deterministic (head kept) via
+/// [`crate::text::truncate`].
 pub(crate) const MAX_STATE_FIELD_BYTES: usize = 6_000;
+
+/// Cap one state field to [`MAX_STATE_FIELD_BYTES`] bytes (head kept, cut
+/// walked back to a codepoint boundary). Returns the capped text and the
+/// number of bytes dropped — 0 when nothing was cut.
+pub(crate) fn cap_state_field(text: &str) -> (&str, usize) {
+    let capped = crate::text::truncate(text, MAX_STATE_FIELD_BYTES);
+    (capped, text.len() - capped.len())
+}
+
+/// Deep-cap every string value inside `state` to [`MAX_STATE_FIELD_BYTES`]
+/// bytes (head kept, codepoint boundary respected) before the request body is
+/// built. Wire question ids are object keys and are left alone; nested arrays
+/// and objects are walked so every string value is bounded.
+fn cap_state_value(state: &Value) -> Value {
+    match state {
+        Value::String(s) => {
+            Value::String(crate::text::truncate(s, MAX_STATE_FIELD_BYTES).to_string())
+        }
+        Value::Array(items) => Value::Array(items.iter().map(cap_state_value).collect()),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, value)| (key.clone(), cap_state_value(value)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Read at most `max_bytes` from the head of `path` — never the whole file.
+/// Returns the head text and the number of file bytes not included (0 when
+/// the whole file was read). A file at or under the cap is read whole (the
+/// plain read, invalid UTF-8 and all); a longer file reads exactly the head
+/// bytes, and the only possible invalid UTF-8 there is the cap landing inside
+/// the final codepoint — `valid_up_to` is that codepoint's boundary, so the
+/// cut drops it whole and never splits a codepoint.
+fn read_head_capped(path: &Path, max_bytes: usize) -> Result<(String, usize)> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    if (len as usize) <= max_bytes {
+        let mut content = String::new();
+        file.read_to_string(&mut content)?;
+        return Ok((content, 0));
+    }
+    let mut buf = vec![0u8; max_bytes];
+    file.read_exact(&mut buf)?;
+    let end = match std::str::from_utf8(&buf) {
+        Ok(_) => buf.len(),
+        Err(e) => e.valid_up_to(),
+    };
+    let content =
+        String::from_utf8(buf[..end].to_vec()).map_err(|_| eyre!("output is not valid UTF-8"))?;
+    Ok((content, len as usize - end))
+}
 
 /// DashScope intl OpenAI-compatible root — final fallback when neither env
 /// (`QWEN_DECISION_BASE_URL`) nor the dc store (`services
@@ -262,14 +318,20 @@ fn real_dc() -> impl Fn(&str, &str) -> io::Result<DcOutput> {
 
 /// One System One request: `POST {base}/systemone` with bearer auth, then
 /// strict decode (the rounded-hundredths policy applies itself when the
-/// Alibaba decision model answers).
+/// Alibaba decision model answers). Every string inside `state` is capped at
+/// [`MAX_STATE_FIELD_BYTES`] bytes before the body is built — a backstop for
+/// callers that skip the [`judge_output`] assembly. Backstop cuts are not
+/// recorded: [`JudgeResult`] is the decoded wire shape and carries no room
+/// for provenance (cuts made where the state is assembled are recorded on
+/// [`JudgeRunDetail`]).
 pub async fn classify(
     cfg: &JudgeConfig,
     state: &Value,
     questions: &[Question],
 ) -> Result<JudgeResult> {
     let endpoint = system_one::build_endpoint(&cfg.base).map_err(|e| eyre!("{e}"))?;
-    let wire = system_one::encode(&cfg.model, state, questions).map_err(|e| eyre!("{e}"))?;
+    let state = cap_state_value(state);
+    let wire = system_one::encode(&cfg.model, &state, questions).map_err(|e| eyre!("{e}"))?;
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(5))
@@ -487,7 +549,12 @@ pub struct JudgeOutcome {
 /// Judge one generated output against `eval`. Text-like outputs are sent to
 /// the decision model directly; images and video are observed first (the
 /// observer writes a factual per-criterion description, which becomes the
-/// judged text). Audio must be gated by the caller.
+/// judged text). Audio must be gated by the caller. Every `state` field is
+/// capped at [`MAX_STATE_FIELD_BYTES`] bytes (head kept, codepoint boundary
+/// respected); the output file is read head-first, never past the cap, and
+/// the total dropped byte count lands on
+/// [`JudgeRunDetail::state_cut_bytes`] — a cut is never silent. (The
+/// [`JudgeResult`] wire type itself has no room for this provenance.)
 #[allow(clippy::too_many_arguments)]
 pub async fn judge_output(
     cfg: &JudgeConfig,
@@ -501,20 +568,24 @@ pub async fn judge_output(
     verbose: bool,
 ) -> Result<JudgeOutcome> {
     let rubric = build_rubric(eval);
+    let (prompt_head, prompt_dropped) = cap_state_field(prompt_text);
     let mut state = json!({
-        "prompt": crate::text::truncate(prompt_text, MAX_STATE_FIELD_BYTES),
+        "prompt": prompt_head,
         "asset_type": asset_type_label,
         "output_format": output_format,
     });
+    let mut state_cut_bytes = prompt_dropped;
     let mut observer_model: Option<String> = None;
     match kind {
         OutputKind::Text => {
-            let content = std::fs::read_to_string(output_path)
+            let (content, read_dropped) = read_head_capped(output_path, MAX_STATE_FIELD_BYTES)
                 .wrap_err_with(|| format!("cannot read output file {}", output_path.display()))?;
             if content.trim().is_empty() {
                 bail!("output file {} is empty", output_path.display());
             }
-            state["output"] = json!(crate::text::truncate(&content, MAX_STATE_FIELD_BYTES));
+            let (head, dropped) = cap_state_field(&content);
+            state["output"] = json!(head);
+            state_cut_bytes += read_dropped + dropped;
         }
         OutputKind::Image | OutputKind::Video => {
             let observer = observer.ok_or_else(|| {
@@ -543,8 +614,10 @@ pub async fn judge_output(
             let observed = observer
                 .describe(&crate::inference::criterion_brief(eval), &attachments, verbose)
                 .await?;
-            state["observations"] = json!(crate::text::truncate(&observed.description, MAX_STATE_FIELD_BYTES));
+            let (head, dropped) = cap_state_field(&observed.description);
+            state["observations"] = json!(head);
             state["observed_by"] = json!(observed.model);
+            state_cut_bytes += dropped;
             observer_model = Some(observed.model);
         }
         OutputKind::Audio => bail!("audio cannot be judged (no observation path)"),
@@ -557,6 +630,7 @@ pub async fn judge_output(
     let score = score_result(&result, &rubric, eval, cfg.backend.as_str());
     let mut detail = JudgeRunDetail::from_result(cfg.backend.as_str(), &result, &rubric);
     detail.observer_model = observer_model;
+    detail.state_cut_bytes = state_cut_bytes;
     Ok(JudgeOutcome {
         score,
         detail,
@@ -590,6 +664,11 @@ pub struct JudgeRunDetail {
     pub request_id: Option<String>,
     /// Set when an observe -> decide pass preceded the judge call.
     pub observer_model: Option<String>,
+    /// Total bytes dropped from `state` fields by the
+    /// [`MAX_STATE_FIELD_BYTES`] cap before the request was sent (0 = nothing
+    /// was cut). The wire [`JudgeResult`] has no room for this provenance, so
+    /// the cut is recorded here instead of being silent.
+    pub state_cut_bytes: usize,
     /// wire question id -> ordered level probabilities.
     pub probabilities: BTreeMap<String, Vec<f64>>,
 }
@@ -610,6 +689,7 @@ impl JudgeRunDetail {
             model: result.model.clone(),
             request_id: result.request_id.clone(),
             observer_model: None,
+            state_cut_bytes: 0,
             probabilities,
         }
     }
@@ -1457,6 +1537,34 @@ mod tests {
         (format!("http://{addr}/v1"), captured, tx)
     }
 
+    /// Temp directory removed even when an assertion fails; the name carries
+    /// pid + nanos so concurrent test processes never share one directory.
+    struct ScratchDir(std::path::PathBuf);
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn cap_state_field_counts_bytes_and_never_splits_a_codepoint() {
+        // Exactly at the cap: no cut.
+        let exact = "x".repeat(MAX_STATE_FIELD_BYTES);
+        let (capped, dropped) = cap_state_field(&exact);
+        assert_eq!(capped.len(), MAX_STATE_FIELD_BYTES);
+        assert_eq!(dropped, 0);
+        // Multibyte: the cap's last byte lands inside a 3-byte codepoint; the
+        // cut walks back so the trailing codepoint is dropped whole. This is
+        // the shared helper behind every state-field cut, including the
+        // image/video `observations` path.
+        let text = format!("{}{}", "x".repeat(MAX_STATE_FIELD_BYTES - 1), "\u{8bc4}");
+        let (capped, dropped) = cap_state_field(&text);
+        assert_eq!(capped.len(), MAX_STATE_FIELD_BYTES - 1);
+        assert_eq!(dropped, 3);
+        assert!(capped.is_char_boundary(capped.len()));
+        assert!(!capped.contains('\u{8bc4}'));
+    }
+
     #[tokio::test]
     async fn judge_output_caps_state_fields_at_the_wire() {
         // The decode fixture must answer the GA request model under the
@@ -1517,14 +1625,23 @@ mod tests {
             ..cfg
         };
 
-        let dir = std::env::temp_dir().join(format!(
-            "media-tool-judge-cap-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let output_path = dir.join("out.svg");
-        let huge = "x".repeat(MAX_STATE_FIELD_BYTES + 5_000);
-        let prompt = format!("brief prefix {}", "y".repeat(MAX_STATE_FIELD_BYTES + 2_000));
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        let dir = ScratchDir(std::env::temp_dir().join(format!(
+            "media-tool-judge-cap-{}-{}",
+            std::process::id(),
+            nanos
+        )));
+        std::fs::create_dir_all(&dir.0).unwrap();
+        let output_path = dir.0.join("out.svg");
+        // Multibyte prompt: the 6000th byte is a boundary between 2-byte
+        // codepoints, so the head cut keeps exactly the cap in bytes.
+        let prompt = format!("brief {}", "\u{e9}".repeat(MAX_STATE_FIELD_BYTES));
+        // Multibyte output: the head read stops one byte short of a 3-byte
+        // codepoint and walks back, dropping that codepoint whole.
+        let huge = format!("{}{}", "x".repeat(MAX_STATE_FIELD_BYTES - 1), "\u{8bc4}");
         std::fs::write(&output_path, &huge).unwrap();
 
         let eval = sample_eval();
@@ -1544,17 +1661,22 @@ mod tests {
         assert!(outcome.score.weighted.is_finite());
         let _ = tx.send(());
 
-        // Every state field the judge sent is capped at the named bound,
-        // head kept, and the request model is the GA id.
+        // Every state field the judge sent is capped at the named byte bound,
+        // head kept, no codepoint split, and the request model is the GA id.
         let body = captured.lock().unwrap().take().expect("handler ran");
         assert_eq!(body["model"], "decision-model");
         let state = &body["state"];
         let sent_prompt = state["prompt"].as_str().unwrap();
         let sent_output = state["output"].as_str().unwrap();
-        assert_eq!(sent_output.len(), MAX_STATE_FIELD_BYTES);
-        assert_eq!(sent_output, &huge[..MAX_STATE_FIELD_BYTES]);
         assert_eq!(sent_prompt.len(), MAX_STATE_FIELD_BYTES);
-        assert!(sent_prompt.starts_with("brief prefix "));
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(sent_prompt.starts_with("brief "));
+        assert!(sent_prompt.is_char_boundary(sent_prompt.len()));
+        assert_eq!(sent_output.len(), MAX_STATE_FIELD_BYTES - 1);
+        assert!(sent_output.chars().all(|c| c == 'x'));
+        assert!(!sent_output.contains('\u{8bc4}'));
+        // The cut is recorded: prompt dropped 6006 bytes, the output file's
+        // tail codepoint dropped 3 (head read walk-back; the field cap cut
+        // nothing further).
+        assert_eq!(outcome.detail.state_cut_bytes, 6006 + 3);
     }
 }

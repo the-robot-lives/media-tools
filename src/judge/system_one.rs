@@ -229,6 +229,12 @@ pub enum PolicyOverride {
 /// from Σp·i, which the strict exact-equality check rejects). Both get the
 /// rounded-hundredths policy by default; `PolicyOverride::Strict` restores
 /// the exact check inside the gated path.
+/// Literal id allowlist, deliberately not a prefix match: a future alias or
+/// versioned decision-model id (`decision-model-2`, a workspace re-export)
+/// silently falls back to the strict exact-mass policy and rejects the real
+/// hundredths drift those services emit until it is added here. When Alibaba
+/// ships a new decision-model id, extend this list and the decode fixtures
+/// together.
 fn is_alibaba_rounded_model(model: &str) -> bool {
     model == "decision-model" || model == "decision-model-preview"
 }

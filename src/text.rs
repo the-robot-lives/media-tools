@@ -8,10 +8,11 @@
 //!
 //! [`truncate`] cuts at the last character boundary at or before the limit instead.
 
-/// Borrow at most `max_bytes` of `s`, cut at a character boundary.
+/// Borrow at most `max_bytes` **bytes** of `s`, cut at a codepoint boundary.
 ///
-/// Never panics, and never splits a character. The result may be shorter than `max_bytes`
-/// when the boundary falls earlier.
+/// The limit counts bytes (`str::len`), never characters. Never panics, and
+/// never splits a codepoint: the result may be shorter than `max_bytes` when
+/// the boundary falls earlier.
 pub fn truncate(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
         return s;
